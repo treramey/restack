@@ -1,0 +1,16 @@
+{
+  "name": "@restack-cli/darwin-arm64",
+  "version": "0.1.0",
+  "description": "Restack CLI binary for darwin-arm64",
+  "files": ["restack", "postinstall.js"],
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "preferUnplugged": true,
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT"
+}

@@ -22,6 +22,8 @@ pub enum PromoteCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Auto-promote CI-passed topics to auto_promote environments
+    Auto,
     /// Demote a topic from an environment
     From {
         /// Topic ID or branch name
@@ -39,6 +41,10 @@ pub enum PromoteCommand {
 
 pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Result<String> {
     match cmd {
+        PromoteCommand::Auto => {
+            let result = promote_service::promote_auto(conn)?;
+            Ok(serde_json::to_string_pretty(&result)?)
+        }
         PromoteCommand::To {
             topic,
             env,
@@ -46,7 +52,7 @@ pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Resu
             dry_run,
         } => {
             let repo_id: RepoId = repo.parse().map_err(|_| {
-                crate::error::RestackError::RepoNotFound(RepoId::new())
+                crate::error::RestackError::InvalidId(repo.clone())
             })?;
             let result =
                 promote_service::promote_to(conn, topic, env, &repo_id, repo_path, *dry_run)?;
@@ -59,7 +65,7 @@ pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Resu
             dry_run,
         } => {
             let repo_id: RepoId = repo.parse().map_err(|_| {
-                crate::error::RestackError::RepoNotFound(RepoId::new())
+                crate::error::RestackError::InvalidId(repo.clone())
             })?;
             let result =
                 promote_service::demote_from(conn, topic, env, &repo_id, repo_path, *dry_run)?;

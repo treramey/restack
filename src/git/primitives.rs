@@ -446,6 +446,32 @@ pub fn has_commits_between(repo: &Path, base: &str, head: &str) -> GitResult<boo
 }
 
 /// Push a tag to origin.
+/// Detect the default branch from the remote HEAD (e.g. "main" or "master").
+/// Falls back to "main" if the remote HEAD cannot be resolved.
+pub fn detect_default_branch(repo: &Path) -> String {
+    // `git symbolic-ref refs/remotes/origin/HEAD` -> "refs/remotes/origin/main"
+    match run_git(repo, &["symbolic-ref", "refs/remotes/origin/HEAD"]) {
+        Ok(full_ref) => full_ref
+            .trim()
+            .rsplit('/')
+            .next()
+            .unwrap_or("main")
+            .to_string(),
+        Err(_) => {
+            // Try `git remote show origin` as fallback (slower, needs network)
+            match run_git(repo, &["remote", "show", "origin"]) {
+                Ok(output) => output
+                    .lines()
+                    .find(|l| l.contains("HEAD branch:"))
+                    .and_then(|l| l.split(':').nth(1))
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_else(|| "main".to_string()),
+                Err(_) => "main".to_string(),
+            }
+        }
+    }
+}
+
 pub fn push_tag(repo: &Path, tag: &str) -> GitResult<()> {
     run_git(repo, &["push", "origin", tag])?;
     Ok(())

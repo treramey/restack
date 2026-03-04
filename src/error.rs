@@ -66,6 +66,12 @@ pub enum RestackError {
 
     #[error("Provider API error: {0}")]
     ProviderApiError(String),
+
+    #[error("Invalid ID: '{0}'")]
+    InvalidId(String),
+
+    #[error("Repo already tracked: {0}")]
+    RepoAlreadyTracked(String),
 }
 
 pub type Result<T> = std::result::Result<T, RestackError>;

@@ -1,0 +1,31 @@
+{
+  "name": "@restack-cli/restack",
+  "version": "0.1.0",
+  "description": "Restack - Topic branch integration manager",
+  "type": "module",
+  "bin": {
+    "restack": "bin/restack"
+  },
+  "files": ["bin/"],
+  "scripts": {
+    "postinstall": "node ./bin/postinstall.mjs"
+  },
+  "optionalDependencies": {
+    "@restack-cli/darwin-arm64": "0.1.0",
+    "@restack-cli/darwin-x64": "0.1.0",
+    "@restack-cli/linux-x64": "0.1.0",
+    "@restack-cli/win32-x64": "0.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-org/restack.git"
+  },
+  "keywords": ["git", "topic-branch", "integration", "restack", "ci"],
+  "license": "MIT"
+}

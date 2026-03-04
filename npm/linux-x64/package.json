@@ -1,0 +1,16 @@
+{
+  "name": "@restack-cli/linux-x64",
+  "version": "0.1.0",
+  "description": "Restack CLI binary for linux-x64",
+  "files": ["restack", "postinstall.js"],
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "preferUnplugged": true,
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT"
+}

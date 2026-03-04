@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+/**
+ * Unified CLI entry point.
+ * Delegates all commands to the platform-specific native binary.
+ */
+import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { platform, arch } from "node:process";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const require = createRequire(import.meta.url);
+
+const PLATFORMS = {
+  "darwin-arm64": "@restack-cli/darwin-arm64",
+  "darwin-x64": "@restack-cli/darwin-x64",
+  "linux-x64": "@restack-cli/linux-x64",
+  "win32-x64": "@restack-cli/win32-x64",
+};
+
+function getBinaryPath() {
+  if (process.env.RESTACK_CLI_PATH) {
+    return process.env.RESTACK_CLI_PATH;
+  }
+
+  const cpuArch = arch === "arm64" ? "arm64" : "x64";
+  const key = `${platform}-${cpuArch}`;
+  const pkg = PLATFORMS[key];
+
+  if (!pkg) {
+    console.error(`Unsupported platform: ${key}`);
+    console.error("Supported: darwin-arm64, darwin-x64, linux-x64, win32-x64");
+    process.exit(1);
+  }
+
+  const binaryName = platform === "win32" ? "restack.exe" : "restack";
+
+  try {
+    const pkgPath = require.resolve(`${pkg}/package.json`);
+    return join(dirname(pkgPath), binaryName);
+  } catch {
+    console.error(`Platform package not installed: ${pkg}`);
+    console.error(`\nTry:`);
+    console.error(`  npm install -g ${pkg}`);
+    console.error(`  npm install -g @restack-cli/restack --include=optional`);
+    process.exit(1);
+  }
+}
+
+const binaryPath = getBinaryPath();
+
+if (!existsSync(binaryPath)) {
+  console.error(`Binary not found: ${binaryPath}`);
+  process.exit(1);
+}
+
+const child = spawn(binaryPath, process.argv.slice(2), {
+  stdio: "inherit",
+});
+
+child.on("error", (err) => {
+  console.error(`Failed to run restack: ${err.message}`);
+  process.exit(1);
+});
+
+child.on("exit", (code, signal) => {
+  if (signal) {
+    process.kill(process.pid, signal);
+  } else {
+    process.exit(code ?? 0);
+  }
+});

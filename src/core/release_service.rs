@@ -175,7 +175,7 @@ pub fn graduate_topics(
     }
 
     // Rebuild all environments after graduation
-    rebuild_service::rebuild_all(conn, repo_id, repo_path, dry_run)?;
+    rebuild_service::rebuild_all(conn, repo_id, repo_path, dry_run, false)?;
 
     Ok(graduated)
 }

@@ -23,6 +23,8 @@ pub enum RepoCommand {
     },
     /// List all repositories
     List,
+    /// Auto-discover git repos in workspace subdirectories
+    Detect,
 }
 
 pub fn handle(conn: &Connection, cmd: &RepoCommand, workspace_root: &Path) -> Result<String> {
@@ -38,6 +40,10 @@ pub fn handle(conn: &Connection, cmd: &RepoCommand, workspace_root: &Path) -> Re
         RepoCommand::List => {
             let repos = repo_service::list_repos(conn)?;
             Ok(serde_json::to_string_pretty(&repos)?)
+        }
+        RepoCommand::Detect => {
+            let result = repo_service::detect_repos(conn, workspace_root)?;
+            Ok(serde_json::to_string_pretty(&result)?)
         }
     }
 }

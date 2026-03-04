@@ -6,10 +6,11 @@
  *   restack-host ui --cli-path /path/to/restack --cwd /path/to/repo --static-root /path/to/dist --port 6969
  */
 import { configureCli } from "./cli.js";
+import { startMcp } from "./mcp.js";
 import { startUiServer } from "./ui.js";
 
 interface Args {
-  mode: "ui";
+  mode: "ui" | "mcp";
   cliPath: string;
   cwd: string;
   staticRoot: string;
@@ -19,13 +20,14 @@ interface Args {
 function parseArgs(argv: readonly string[]): Args {
   const args = argv.slice(2);
 
-  if (args.length === 0 || args[0] !== "ui") {
+  const mode = args[0];
+  if (mode !== "ui" && mode !== "mcp") {
     printUsage();
     process.exit(1);
   }
 
   const result: Args = {
-    mode: "ui",
+    mode,
     cliPath: "restack",
     cwd: process.cwd(),
     staticRoot: "./dist",
@@ -90,19 +92,24 @@ function parseArgs(argv: readonly string[]): Args {
 
 function printUsage(): void {
   console.log(`
-Restack Host - UI server for Restack
+Restack Host - UI and MCP server for Restack
 
 Usage:
-  restack-host ui [options]
+  restack-host <ui|mcp> [options]
+
+Modes:
+  ui     Start HTTP server with web UI
+  mcp    Start MCP server over stdio (for AI agent integration)
 
 Options:
   --cli-path <path>      Path to restack binary (default: "restack" in PATH)
   --cwd <path>           Working directory for CLI commands (default: current dir)
-  --static-root <path>   Path to static files (default: ./dist)
-  --port <number>        HTTP port (default: 6969)
+  --static-root <path>   Path to static files (default: ./dist) [ui mode only]
+  --port <number>        HTTP port (default: 6969) [ui mode only]
 
 Examples:
   restack-host ui --cli-path ./target/debug/restack --static-root ../ui/dist --port 8080
+  restack-host mcp --cli-path ./target/debug/restack --cwd /path/to/repo
 `.trim());
 }
 
@@ -114,10 +121,17 @@ async function main(): Promise<void> {
     cwd: args.cwd,
   });
 
-  await startUiServer({
-    port: args.port,
-    staticRoot: args.staticRoot,
-  });
+  switch (args.mode) {
+    case "mcp":
+      await startMcp();
+      break;
+    case "ui":
+      await startUiServer({
+        port: args.port,
+        staticRoot: args.staticRoot,
+      });
+      break;
+  }
 }
 
 main().catch((err) => {

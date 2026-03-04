@@ -10,10 +10,12 @@
     "build": "tsc",
     "build:check": "tsc --noEmit",
     "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "mcp": "tsx src/index.ts mcp"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.9",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "hono": "^4.11.5"
   },
   "devDependencies": {
