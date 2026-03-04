@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/*
+ * Rose Pine color palette — dark theme tokens.
+ * Maps semantic names to rose-pine values for use in Tailwind classes.
+ */
+@theme {
+  /* Background surfaces */
+  --color-bg-primary: #191724;
+  --color-bg-secondary: #1f1d2e;
+
+  /* Surfaces (cards, panels) */
+  --color-surface-primary: #26233a;
+  --color-surface-secondary: #2a273f;
+
+  /* Text */
+  --color-text-primary: #e0def4;
+  --color-text-muted: #908caa;
+  --color-text-dim: #6e6a86;
+
+  /* Accent (iris / purple) */
+  --color-accent: #c4a7e7;
+  --color-accent-muted: #a08dc7;
+  --color-accent-subtle: oklch(from #c4a7e7 l c h / 0.15);
+
+  /* Borders */
+  --color-border: #393552;
+  --color-border-hover: #524f67;
+  --color-border-focus: #c4a7e7;
+
+  /* Status — environment colors */
+  --color-env-dev: #9ccfd8;
+  --color-env-staging: #f6c177;
+  --color-env-production: #31748f;
+  --color-env-conflict: #eb6f92;
+  --color-env-unassigned: #6e6a86;
+
+  /* Status — topic / CI */
+  --color-status-active: #9ccfd8;
+  --color-status-conflict: #eb6f92;
+  --color-status-graduated: #31748f;
+  --color-status-closed: #6e6a86;
+  --color-status-ci-pending: #f6c177;
+  --color-status-ci-passed: #9ccfd8;
+  --color-status-ci-failed: #eb6f92;
+
+  /* Rebuild */
+  --color-rebuild-running: #f6c177;
+  --color-rebuild-success: #9ccfd8;
+  --color-rebuild-partial: #ebbcba;
+  --color-rebuild-failed: #eb6f92;
+}
+
+/* Base resets */
+*,
+*::before,
+*::after {
+  scrollbar-color: var(--color-border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-hover);
+}

@@ -1,0 +1,42 @@
+# Build artifacts
+target/
+build/
+dist/
+
+# Dependencies
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+
+# Test artifacts
+test-results/
+ui/test-results/
+ui-test-*.png
+
+# OpenCode
+.opencode/
+*.omc
+
+# Environment
+.env
+.env.*
+
+# npm publish artifacts (generated at release)
+npm/restack-darwin-*/
+npm/restack-linux-*/
+npm/restack-win32-*/
+npm/restack/dist/
