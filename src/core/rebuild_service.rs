@@ -63,9 +63,7 @@ fn open_in_editor(conflict_info: &str) {
     let tmp_path = std::env::temp_dir().join(format!("restack-conflict-{unique_id}.txt"));
 
     if std::fs::write(&tmp_path, conflict_info).is_ok() {
-        let _ = std::process::Command::new(&editor)
-            .arg(&tmp_path)
-            .status();
+        let _ = std::process::Command::new(&editor).arg(&tmp_path).status();
     } else {
         eprintln!("Failed to write conflict info to temp file");
     }
@@ -85,7 +83,7 @@ fn open_in_editor(conflict_info: &str) {
 pub fn rebuild_env(
     conn: &Connection,
     env_id: &EnvId,
-    repo_path: &Path,
+    _repo_path: &Path,
     dry_run: bool,
     interactive: bool,
 ) -> Result<Rebuild> {
@@ -93,16 +91,16 @@ pub fn rebuild_env(
     let repo = repo_repo::get_repo(conn, &env.repo_id)?;
     let topics = topic_env_repo::get_topics_in_env(conn, env_id)?;
 
+    let repo_path = Path::new(&repo.path);
+
     let rebuild = rebuild_repo::create_rebuild(conn, env_id)?;
 
     let mut merged_count: i32 = 0;
     let mut conflicted_count: i32 = 0;
     let mut aborted = false;
 
-    // Fetch latest refs
     git::fetch(repo_path)?;
 
-    // Resolve base to a commit SHA — all subsequent work is object-level
     let base_ref = format!("origin/{}", repo.base_branch);
     let mut current_sha = git::resolve_ref(repo_path, &base_ref)?;
 
@@ -121,12 +119,20 @@ pub fn rebuild_env(
         // Phase 1: topics in BOTH this env and the lower env
         for topic in &phase1 {
             match merge_topic_interactive(
-                repo_path, topic, &mut current_sha, conn, &rebuild,
-                &mut conflicted_count, interactive,
+                repo_path,
+                topic,
+                &mut current_sha,
+                conn,
+                &rebuild,
+                &mut conflicted_count,
+                interactive,
             )? {
                 MergeOutcome::Merged => merged_count += 1,
                 MergeOutcome::Skipped => {}
-                MergeOutcome::Abort => { aborted = true; break; }
+                MergeOutcome::Abort => {
+                    aborted = true;
+                    break;
+                }
             }
         }
 
@@ -134,18 +140,25 @@ pub fn rebuild_env(
             // Marker commit (same tree, new commit — no working-tree mutation)
             let tree_oid = git::rev_parse_tree(repo_path, &current_sha)?;
             let marker_msg = format!("### Match '{}'", lower.name);
-            current_sha =
-                git::commit_tree(repo_path, &tree_oid, &[&current_sha], &marker_msg)?;
+            current_sha = git::commit_tree(repo_path, &tree_oid, &[&current_sha], &marker_msg)?;
 
             // Phase 2: topics ONLY in this env
             for topic in &phase2 {
                 match merge_topic_interactive(
-                    repo_path, topic, &mut current_sha, conn, &rebuild,
-                    &mut conflicted_count, interactive,
+                    repo_path,
+                    topic,
+                    &mut current_sha,
+                    conn,
+                    &rebuild,
+                    &mut conflicted_count,
+                    interactive,
                 )? {
                     MergeOutcome::Merged => merged_count += 1,
                     MergeOutcome::Skipped => {}
-                    MergeOutcome::Abort => { aborted = true; break; }
+                    MergeOutcome::Abort => {
+                        aborted = true;
+                        break;
+                    }
                 }
             }
         }
@@ -153,12 +166,20 @@ pub fn rebuild_env(
         // SINGLE-PHASE REBUILD
         for topic in &topics {
             match merge_topic_interactive(
-                repo_path, topic, &mut current_sha, conn, &rebuild,
-                &mut conflicted_count, interactive,
+                repo_path,
+                topic,
+                &mut current_sha,
+                conn,
+                &rebuild,
+                &mut conflicted_count,
+                interactive,
             )? {
                 MergeOutcome::Merged => merged_count += 1,
                 MergeOutcome::Skipped => {}
-                MergeOutcome::Abort => { aborted = true; break; }
+                MergeOutcome::Abort => {
+                    aborted = true;
+                    break;
+                }
             }
         }
     }
@@ -261,11 +282,11 @@ fn merge_topic_interactive(
                     *conflicted_count += 1;
                     conflict_repo::create_conflict(conn, &rebuild.id, &topic.id, None)?;
                     crate::db::topic_repo::update_topic_status(
-                        conn, &topic.id, TopicStatus::Conflict,
+                        conn,
+                        &topic.id,
+                        TopicStatus::Conflict,
                     )?;
-                    let _ = topic_env_repo::remove_topic_from_env(
-                        conn, &topic.id, &rebuild.env_id,
-                    );
+                    let _ = topic_env_repo::remove_topic_from_env(conn, &topic.id, &rebuild.env_id);
                     return Ok(MergeOutcome::Skipped);
                 }
 
@@ -274,11 +295,12 @@ fn merge_topic_interactive(
                         *conflicted_count += 1;
                         conflict_repo::create_conflict(conn, &rebuild.id, &topic.id, None)?;
                         crate::db::topic_repo::update_topic_status(
-                            conn, &topic.id, TopicStatus::Conflict,
+                            conn,
+                            &topic.id,
+                            TopicStatus::Conflict,
                         )?;
-                        let _ = topic_env_repo::remove_topic_from_env(
-                            conn, &topic.id, &rebuild.env_id,
-                        );
+                        let _ =
+                            topic_env_repo::remove_topic_from_env(conn, &topic.id, &rebuild.env_id);
                         return Ok(MergeOutcome::Skipped);
                     }
                     ConflictAction::OpenEditor => {
@@ -310,4 +332,135 @@ fn find_lower_ordinal_env(
         .into_iter()
         .filter(|e| e.ordinal < current_ordinal)
         .max_by_key(|e| e.ordinal))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use super::*;
+    use crate::db::schema::open_db;
+    use crate::id::EnvId;
+
+    /// Verify rebuild_env uses DB repo path, not the passed-in path.
+    /// This tests the fix that made rebuild look up repo from DB.
+    #[test]
+    fn test_rebuild_from_outside_repo() {
+        // 1. Create temp workspace with git repo
+        let workspace = tempfile::tempdir().expect("create workspace temp dir");
+        let repo_path = workspace.path().join("my-repo");
+        std::fs::create_dir_all(&repo_path).expect("create repo dir");
+
+        // 2. Init git repo with required branches
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("git init");
+
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("git config email");
+
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("git config name");
+
+        // Create initial commit on main
+        std::fs::write(repo_path.join("README.md"), "# test\n").expect("write readme");
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(&repo_path)
+            .status()
+            .expect("git add");
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("git commit");
+
+        // Create dev and staging branches
+        Command::new("git")
+            .args(["branch", "dev"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("create dev branch");
+        Command::new("git")
+            .args(["branch", "staging"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("create staging branch");
+
+        // 3. Add origin remote pointing to itself (required for fetch)
+        Command::new("git")
+            .args(["remote", "add", "origin", "."])
+            .current_dir(&repo_path)
+            .status()
+            .expect("add origin remote");
+        Command::new("git")
+            .args(["fetch", "origin"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("fetch origin");
+
+        // 4. Create DB in workspace
+        let db_path = workspace.path().join(".restack").join("workspace.db");
+        let conn = open_db(&db_path).expect("open db");
+
+        // 5. Insert repo record
+        let repo_id = crate::id::RepoId::new();
+        conn.execute(
+            "INSERT INTO repos (id, name, path, provider, base_branch, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                &repo_id,
+                "my-repo",
+                repo_path.to_str().unwrap(),
+                "unknown",
+                "main",
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )
+        .expect("insert repo");
+
+        // 6. Insert env record
+        let env_id = EnvId::new();
+        conn.execute(
+            "INSERT INTO environments (id, repo_id, name, branch, ordinal) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![&env_id, &repo_id, "staging", "staging", 0],
+        )
+        .expect("insert env");
+
+        // 7. Change to a different directory (outside the repo)
+        let outside_dir = tempfile::tempdir().expect("create outside temp dir");
+
+        // 8. Call rebuild_env with a DUMMY path - it should use DB path instead
+        // dry_run=true to avoid any push operations
+        let result = rebuild_env(
+            &conn,
+            &env_id,
+            Path::new("/dummy/path/that/does/not/exist"),
+            true,  // dry_run
+            false, // interactive
+        );
+
+        // 9. Assert success - the function should NOT fail with "not a git repository"
+        // because it uses the DB repo path, not the dummy path
+        assert!(
+            result.is_ok(),
+            "rebuild_env should succeed using DB path, got error: {:?}",
+            result.err()
+        );
+
+        let rebuild = result.unwrap();
+        assert_eq!(rebuild.status, crate::types::RebuildStatus::Success);
+        assert_eq!(rebuild.topics_merged, 0); // no topics in env
+
+        // Cleanup: change back to original dir (not strictly necessary)
+        drop(outside_dir);
+        drop(workspace);
+    }
 }

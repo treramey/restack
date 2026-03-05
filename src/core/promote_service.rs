@@ -23,18 +23,22 @@ pub fn promote_to(
     topic_id_or_branch: &str,
     env_name: &str,
     repo_id: &RepoId,
-    repo_path: &Path,
+    _repo_path: &Path,
     dry_run: bool,
 ) -> Result<PromoteResult> {
     let topic = resolve_topic(conn, topic_id_or_branch, repo_id)?;
     let env = resolve_env(conn, env_name, repo_id)?;
+
+    // Use the path registered for this specific repo, not the caller-supplied repo_path
+    let repo = repo_repo::get_repo(conn, repo_id)?;
+    let this_repo_path = std::path::Path::new(&repo.path);
 
     if !dry_run {
         // Add topic to environment
         topic_env_repo::add_topic_to_env(conn, &topic.id, &env.id)?;
 
         // Trigger rebuild
-        let rebuild = rebuild_service::rebuild_env(conn, &env.id, repo_path, false, false)?;
+        let rebuild = rebuild_service::rebuild_env(conn, &env.id, this_repo_path, false, false)?;
         Ok(PromoteResult {
             topic,
             env,
@@ -56,18 +60,22 @@ pub fn demote_from(
     topic_id_or_branch: &str,
     env_name: &str,
     repo_id: &RepoId,
-    repo_path: &Path,
+    _repo_path: &Path,
     dry_run: bool,
 ) -> Result<PromoteResult> {
     let topic = resolve_topic(conn, topic_id_or_branch, repo_id)?;
     let env = resolve_env(conn, env_name, repo_id)?;
+
+    // Use the path registered for this specific repo, not the caller-supplied repo_path
+    let repo = repo_repo::get_repo(conn, repo_id)?;
+    let this_repo_path = std::path::Path::new(&repo.path);
 
     if !dry_run {
         // Remove topic from environment
         topic_env_repo::remove_topic_from_env(conn, &topic.id, &env.id)?;
 
         // Trigger rebuild
-        let rebuild = rebuild_service::rebuild_env(conn, &env.id, repo_path, false, false)?;
+        let rebuild = rebuild_service::rebuild_env(conn, &env.id, this_repo_path, false, false)?;
         Ok(PromoteResult {
             topic,
             env,
@@ -101,9 +109,7 @@ fn resolve_topic(conn: &Connection, id_or_branch: &str, repo_id: &RepoId) -> Res
 fn resolve_env(conn: &Connection, name: &str, repo_id: &RepoId) -> Result<Environment> {
     match env_repo::get_env_by_name(conn, repo_id, name)? {
         Some(env) => Ok(env),
-        None => Err(RestackError::EnvNotFound(
-            name.parse().unwrap_or_default(),
-        )),
+        None => Err(RestackError::EnvNotFound(name.parse().unwrap_or_default())),
     }
 }
 

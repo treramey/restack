@@ -5,6 +5,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{promote_service, rebuild_service, repo_service};
+use crate::db::{env_repo, repo_repo};
 use crate::error::Result;
 use crate::id::{EnvId, RepoId};
 use crate::types::Rebuild;
@@ -59,11 +60,15 @@ pub fn handle(conn: &Connection, cmd: &RebuildCommand, repo_path: &Path) -> Resu
             dry_run,
             interactive,
         } => {
-            let env_id: EnvId = env.parse().map_err(|_| {
-                crate::error::RestackError::InvalidId(env.clone())
-            })?;
+            let env_id: EnvId = env
+                .parse()
+                .map_err(|_| crate::error::RestackError::InvalidId(env.clone()))?;
+            // Look up env and repo from DB to get the correct repo path
+            let env_rec = env_repo::get_env(conn, &env_id)?;
+            let repo = repo_repo::get_repo(conn, &env_rec.repo_id)?;
+            let repo_path = PathBuf::from(&repo.path);
             let rebuild =
-                rebuild_service::rebuild_env(conn, &env_id, repo_path, *dry_run, *interactive)?;
+                rebuild_service::rebuild_env(conn, &env_id, &repo_path, *dry_run, *interactive)?;
             Ok(serde_json::to_string_pretty(&rebuild)?)
         }
         RebuildCommand::All {
@@ -92,17 +97,20 @@ pub fn handle(conn: &Connection, cmd: &RebuildCommand, repo_path: &Path) -> Resu
                 let repo_str = repo.as_deref().ok_or_else(|| {
                     crate::error::RestackError::InvalidId("(none provided)".to_string())
                 })?;
-                let repo_id: RepoId = repo_str.parse().map_err(|_| {
-                    crate::error::RestackError::InvalidId(repo_str.to_string())
-                })?;
-                let rebuilds =
-                    rebuild_service::rebuild_all(conn, &repo_id, repo_path, *dry_run, *interactive)?;
+                let repo_id: RepoId = repo_str
+                    .parse()
+                    .map_err(|_| crate::error::RestackError::InvalidId(repo_str.to_string()))?;
+                let rebuilds = rebuild_service::rebuild_all(
+                    conn,
+                    &repo_id,
+                    repo_path,
+                    *dry_run,
+                    *interactive,
+                )?;
                 Ok(serde_json::to_string_pretty(&rebuilds)?)
             }
         }
-        RebuildCommand::Watch { interval } => {
-            handle_watch(conn, repo_path, *interval)
-        }
+        RebuildCommand::Watch { interval } => handle_watch(conn, repo_path, *interval),
     }
 }
 
@@ -130,12 +138,18 @@ fn handle_watch(conn: &Connection, _repo_path: &Path, interval_secs: u64) -> Res
     while running.load(Ordering::SeqCst) {
         cycles += 1;
         let tick_start = chrono::Utc::now();
-        eprintln!("[{}] Running auto-promote cycle...", tick_start.format("%H:%M:%S"));
+        eprintln!(
+            "[{}] Running auto-promote cycle...",
+            tick_start.format("%H:%M:%S")
+        );
 
         match promote_service::promote_auto(conn) {
             Ok(result) => {
                 if result.promoted.is_empty() {
-                    eprintln!("  No topics to auto-promote ({} CI statuses refreshed)", result.refreshed_topics);
+                    eprintln!(
+                        "  No topics to auto-promote ({} CI statuses refreshed)",
+                        result.refreshed_topics
+                    );
                 } else {
                     total_promoted += result.promoted.len() as u64;
                     eprintln!(
