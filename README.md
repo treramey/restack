@@ -20,24 +20,18 @@ Restack manages feature branches across integration environments (dev, staging, 
 cargo build --release
 export PATH="$PWD/target/release:$PATH"
 
-# Initialize workspace
-cd ~/my-workspace
+# Initialize workspace (auto-tracks current repo + discovers all branches)
+cd ~/my-project
 restack init
 
-# Add a repo (auto-detects default branch from remote)
-restack repo add ./api
+# Refresh: fetch origin, discover new branches, sync CI status
+restack refresh
 
-# Track a feature branch
-restack topic track feature/login --repo <REPO_ID>
+# Promote a topic to dev
+restack promote to feature/login dev
 
-# Promote to dev
-restack promote to feature/login dev --repo <REPO_ID>
-
-# Rebuild dev (dry-run first)
-restack rebuild env <ENV_ID> --dry-run
-
-# Rebuild for real
-restack rebuild env <ENV_ID>
+# Rebuild dev environment
+restack rebuild env dev
 ```
 
 ## Core Concepts
@@ -83,17 +77,13 @@ npm install -g restack-cli
 
 | Command | Description |
 |---------|-------------|
-| `restack init` | Initialize workspace |
-| `restack repo add/remove/list/detect` | Repository management |
-| `restack topic track/untrack/list/status/sync` | Topic branch tracking |
+| `restack init` | Initialize workspace, auto-track repo, discover branches |
+| `restack refresh` | Fetch origin, discover new branches, sync CI, cleanup stale |
+| `restack repo list/remove` | Repository management |
+| `restack topic track/untrack/archive/list/status` | Topic branch tracking |
 | `restack env add/list/status` | Environment management |
-| `restack promote to/from/auto` | Move topics between environments |
-| `restack rebuild env/all/watch` | Rebuild integration branches |
-| `restack release prepare/cut/hotfix/hotfix-release` | Release management |
-| `restack ci status/generate` | CI status and workflow generation |
-| `restack pr create/merge` | Pull request operations |
-| `restack protection set/envs` | Branch protection rules |
-| `restack pipeline trigger` | Trigger CI pipelines |
+| `restack promote to/from` | Move topics between environments |
+| `restack rebuild env/all` | Rebuild integration branches |
 | `restack ui` | Start web UI |
 
 Full reference: [docs/CLI.md](docs/CLI.md)
@@ -106,9 +96,14 @@ npm run build && restack ui
 ```
 
 Three views:
-- **Kanban**: Environment lanes with topic cards
+- **Kanban**: Environment lanes with topic cards (+ Unassigned lane for conflicts)
 - **Canvas**: Multi-repo tree (ReactFlow + dagre)
 - **List**: Table view
+
+Features:
+- Drag-and-drop promotion between environments
+- Toast notifications for merge conflicts
+- Refresh button for branch discovery
 
 ## MCP Server
 
@@ -150,3 +145,4 @@ npm run generate-types
 ## License
 
 MIT
+// test
