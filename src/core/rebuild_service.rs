@@ -99,9 +99,16 @@ pub fn rebuild_env(
     let mut conflicted_count: i32 = 0;
     let mut aborted = false;
 
-    git::fetch(repo_path)?;
+    let has_remote = git::has_remote(repo_path);
+    if has_remote {
+        git::fetch(repo_path)?;
+    }
 
-    let base_ref = format!("origin/{}", repo.base_branch);
+    let base_ref = if has_remote {
+        format!("origin/{}", repo.base_branch)
+    } else {
+        repo.base_branch.clone()
+    };
     let mut current_sha = git::resolve_ref(repo_path, &base_ref)?;
 
     // Determine if this is a two-phase rebuild (dev-style)
@@ -187,7 +194,9 @@ pub fn rebuild_env(
     // Point env branch at the final commit and push — only when not dry_run and not aborted
     if !dry_run && !aborted {
         git::update_ref(repo_path, &env.branch, &current_sha)?;
-        git::force_push(repo_path, &env.branch)?;
+        if has_remote {
+            git::force_push(repo_path, &env.branch)?;
+        }
     }
 
     let status = if aborted {

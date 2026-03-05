@@ -18,7 +18,10 @@ mod provider;
 mod types;
 mod version;
 
-use commands::{ci::CiCommand, env::EnvCommand, pipeline::PipelineCommand, pr::PrCommand, promote::PromoteCommand, protection::ProtectionCommand, rebuild::RebuildCommand, release::ReleaseCommand, repo::RepoCommand, topic::TopicCommand};
+use commands::{
+    conflicts::ConflictsCommand, env::EnvCommand, promote::PromoteCommand, rebuild::RebuildCommand,
+    repo::RepoCommand, topic::TopicCommand,
+};
 use output::Printer;
 
 #[derive(Parser)]
@@ -66,6 +69,13 @@ enum Command {
     /// Initialize a restack workspace in the current directory
     Init,
 
+    /// Refresh: fetch origin, discover new branches, sync CI status, close deleted branches
+    Refresh {
+        /// Repo ID to refresh (defaults to all repos)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+
     /// Repository management
     #[command(subcommand)]
     Repo(RepoCommand),
@@ -86,25 +96,9 @@ enum Command {
     #[command(subcommand)]
     Rebuild(RebuildCommand),
 
-    /// Release and hotfix management
+    /// List conflicts
     #[command(subcommand)]
-    Release(ReleaseCommand),
-
-    /// CI status and workflow management
-    #[command(subcommand)]
-    Ci(CiCommand),
-
-    /// Pull request management
-    #[command(subcommand)]
-    Pr(PrCommand),
-
-    /// Branch protection management
-    #[command(subcommand)]
-    Protection(ProtectionCommand),
-
-    /// CI pipeline management
-    #[command(subcommand)]
-    Pipeline(PipelineCommand),
+    Conflicts(ConflictsCommand),
 
     /// Generate shell completions
     Completions {
@@ -152,7 +146,10 @@ fn main() {
         let bin_dir = exe.parent().unwrap_or(Path::new("."));
         // In dev: target/debug/restack -> project root is ../../
         // In prod: host/dist/index.js should be alongside or discoverable
-        let project_root = bin_dir.join("../../").canonicalize().unwrap_or_else(|_| cwd.clone());
+        let project_root = bin_dir
+            .join("../../")
+            .canonicalize()
+            .unwrap_or_else(|_| cwd.clone());
         let host_entry = project_root.join("host/dist/index.js");
         let static_root = project_root.join("ui/dist");
 
@@ -187,7 +184,7 @@ fn main() {
 
     let db_path = cli.db.unwrap_or_else(default_db_path);
 
-    let result = run(&cli.command, &db_path, cli.dry_run);
+    let result = run(&cli.command, &db_path);
 
     match result {
         Ok(output) => {
@@ -211,11 +208,16 @@ fn main() {
     }
 }
 
-fn run(command: &Command, db_path: &Path, dry_run: bool) -> error::Result<String> {
+fn run(command: &Command, db_path: &Path) -> error::Result<String> {
     match command {
         Command::Init => {
             let cwd = std::env::current_dir()?;
             commands::init::handle_init(&cwd)
+        }
+        Command::Refresh { repo } => {
+            let conn = db::open_db(db_path)?;
+            let cwd = std::env::current_dir()?;
+            commands::refresh::handle_refresh(&conn, repo.as_deref(), &cwd)
         }
         Command::Repo(cmd) => {
             let conn = db::open_db(db_path)?;
@@ -240,27 +242,9 @@ fn run(command: &Command, db_path: &Path, dry_run: bool) -> error::Result<String
             let cwd = std::env::current_dir()?;
             commands::rebuild::handle(&conn, cmd, &cwd)
         }
-        Command::Release(cmd) => {
+        Command::Conflicts(cmd) => {
             let conn = db::open_db(db_path)?;
-            let cwd = std::env::current_dir()?;
-            commands::release::handle(&conn, cmd, &cwd, dry_run)
-        }
-        Command::Ci(cmd) => {
-            let conn = db::open_db(db_path)?;
-            let cwd = std::env::current_dir()?;
-            commands::ci::handle(&conn, cmd, &cwd)
-        }
-        Command::Pr(cmd) => {
-            let conn = db::open_db(db_path)?;
-            commands::pr::handle(&conn, cmd)
-        }
-        Command::Protection(cmd) => {
-            let conn = db::open_db(db_path)?;
-            commands::protection::handle(&conn, cmd)
-        }
-        Command::Pipeline(cmd) => {
-            let conn = db::open_db(db_path)?;
-            commands::pipeline::handle(&conn, cmd)
+            commands::conflicts::handle(&conn, cmd)
         }
         Command::Completions { .. } => unreachable!("completions handled before run()"),
         Command::Ui { .. } => unreachable!("ui handled before run()"),

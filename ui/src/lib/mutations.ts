@@ -4,6 +4,7 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { apiFetch } from "./api.js";
 import { queryKeys } from "./queries.js";
 import type {
@@ -16,6 +17,7 @@ import type {
   MergeStrategy,
   BranchProtectionResult,
   PipelineRunResult,
+  Conflict,
 } from "../generated/types.js";
 
 /** Promote a topic into a target environment. */
@@ -23,15 +25,24 @@ export function usePromote() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ topicId, envId }: { topicId: TopicId; envId: EnvId }) =>
-      apiFetch<void>("/api/promote/to", {
+      apiFetch<{ conflicts: Conflict[] }>("/api/promote/to", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ topicId, envId }),
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
       void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
       void qc.invalidateQueries({ queryKey: queryKeys.rebuilds.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.conflicts.all });
+
+      if (result.conflicts && result.conflicts.length > 0) {
+        for (const c of result.conflicts) {
+          toast.error("Merge conflict detected", {
+            description: `Topic could not be merged and was removed from the environment.`,
+          });
+        }
+      }
     },
   });
 }
@@ -66,6 +77,48 @@ export function useTopicSync() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
+    },
+  });
+}
+
+export interface RefreshResult {
+  repo: string;
+  discovery: {
+    discovered: number;
+    created: number;
+    closed: number;
+    skipped: number;
+  };
+  ciRefreshed: number;
+}
+
+/** Refresh: fetch origin, discover branches, sync CI, cleanup stale topics. */
+export function useRefresh() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ repo }: { repo?: string }) =>
+      apiFetch<RefreshResult[]>("/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo }),
+      }),
+    onSuccess: (results) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.rebuilds.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.conflicts.all });
+
+      let totalCreated = 0;
+      let totalClosed = 0;
+      for (const r of results) {
+        totalCreated += r.discovery.created;
+        totalClosed += r.discovery.closed;
+      }
+      if (totalCreated > 0 || totalClosed > 0) {
+        toast.success("Refresh complete", {
+          description: `${totalCreated} new topics discovered, ${totalClosed} closed`,
+        });
+      }
     },
   });
 }

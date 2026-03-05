@@ -1,5 +1,7 @@
 use crate::error::Result;
-use crate::provider::{self, CreatePrParams, MergePrParams, MergePrResult, MergeStrategy, PullRequest};
+use crate::provider::{
+    self, CreatePrParams, MergePrParams, MergePrResult, MergeStrategy, PullRequest,
+};
 use crate::types::Repo;
 
 pub fn create_pr(

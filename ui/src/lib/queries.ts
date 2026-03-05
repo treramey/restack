@@ -1,6 +1,10 @@
 /**
  * TanStack Query hooks for restack API data.
  * All server state flows through these hooks — components never call fetch directly.
+ * 
+ * Sync strategy: No polling. Rely on:
+ * - staleTime + refetchOnWindowFocus for user-initiated refresh
+ * - Mutation invalidation for data changes
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -15,8 +19,6 @@ import type {
   CiStatusDetail,
   RepoId,
 } from "../generated/types.js";
-
-const REFETCH_INTERVAL = 5000;
 
 export const queryKeys = {
   repos: {
@@ -53,7 +55,6 @@ export function useRepos() {
   return useQuery({
     queryKey: queryKeys.repos.list(),
     queryFn: () => apiFetch<Repo[]>("/api/repos"),
-    refetchInterval: REFETCH_INTERVAL,
   });
 }
 
@@ -61,7 +62,6 @@ export function useTopics() {
   return useQuery({
     queryKey: queryKeys.topics.list(),
     queryFn: () => apiFetch<Topic[]>("/api/topics"),
-    refetchInterval: REFETCH_INTERVAL,
   });
 }
 
@@ -69,7 +69,6 @@ export function useEnvironments() {
   return useQuery({
     queryKey: queryKeys.environments.list(),
     queryFn: () => apiFetch<Environment[]>("/api/environments"),
-    refetchInterval: REFETCH_INTERVAL,
   });
 }
 
@@ -77,7 +76,6 @@ export function useTopicEnvironments() {
   return useQuery({
     queryKey: queryKeys.topicEnvironments.list(),
     queryFn: () => apiFetch<TopicEnvironment[]>("/api/topic-environments"),
-    refetchInterval: REFETCH_INTERVAL,
   });
 }
 
@@ -85,7 +83,6 @@ export function useRebuilds() {
   return useQuery({
     queryKey: queryKeys.rebuilds.list(),
     queryFn: () => apiFetch<Rebuild[]>("/api/rebuilds"),
-    refetchInterval: REFETCH_INTERVAL,
   });
 }
 
@@ -93,7 +90,6 @@ export function useConflicts() {
   return useQuery({
     queryKey: queryKeys.conflicts.list(),
     queryFn: () => apiFetch<Conflict[]>("/api/conflicts"),
-    refetchInterval: REFETCH_INTERVAL,
   });
 }
 
@@ -102,17 +98,12 @@ export function useCiStatus(repoId: RepoId | null) {
     queryKey: queryKeys.ci.status(repoId ?? ("" as RepoId)),
     queryFn: () => apiFetch<CiStatusDetail[]>(`/api/ci/status?repo=${repoId}`),
     enabled: !!repoId,
-    refetchInterval: REFETCH_INTERVAL,
   });
 }
 
-/**
- * Composite hook: latest rebuild status per environment.
- */
 export function useRebuildStatus() {
   return useQuery({
     queryKey: ["rebuildStatus"] as const,
     queryFn: () => apiFetch<Rebuild[]>("/api/rebuilds?latest=true"),
-    refetchInterval: REFETCH_INTERVAL,
   });
 }

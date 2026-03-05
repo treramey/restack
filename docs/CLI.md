@@ -10,14 +10,16 @@ restack --help                 # Show help
 restack --json <command>       # JSON output mode
 restack --db <path> <command>  # Custom database path
 restack --no-color <command>   # Disable colored output
-restack --dry-run <command>    # Preview without side-effects
 ```
 
 ## Workspace Setup
 
 ### `restack init`
 
-Initialize a restack workspace in the current directory.
+Initialize a restack workspace in the current directory. Automatically:
+1. Registers the current git repo
+2. Discovers all local and remote branches (excluding environment branches)
+3. Creates default environments (staging, dev)
 
 ```bash
 restack init
@@ -25,25 +27,40 @@ restack init
 
 Creates `.restack/workspace.db` (SQLite) and `.restack/config.toml`.
 
-## Repository Management
+**Config: Branch Discovery**
 
-### `restack repo add`
+Exclude patterns are configurable in `.restack/config.toml`:
 
-Add a git repository to the workspace.
+```toml
+[discovery]
+exclude_patterns = ["main", "master", "staging", "dev", "production", "maint", "maint-*"]
+```
+
+### `restack refresh`
+
+Fetch origin, discover new branches, sync CI status, and cleanup stale topics.
 
 ```bash
-restack repo add <PATH> [--name NAME]
+restack refresh [--repo REPO_ID]
 ```
 
 **Arguments:**
-- `PATH` (required): Path to the git repository
-- `--name`: Override display name (defaults to directory name)
+- `--repo`: Refresh a specific repo (defaults to all repos)
 
-Detects the default branch from the remote HEAD and creates default environments (staging, dev).
+**Actions:**
+1. `git fetch origin` for all repos
+2. Discover new branches (respecting exclusion patterns)
+3. Archive topics whose branches no longer exist
+4. Sync CI status from provider (if configured)
 
-**Example:**
+## Repository Management
+
+### `restack repo list`
+
+List all tracked repositories.
+
 ```bash
-restack repo add ./api --name backend-api
+restack repo list
 ```
 
 ### `restack repo remove`
@@ -57,29 +74,11 @@ restack repo remove <ID>
 **Arguments:**
 - `ID` (required): Repo ID or name
 
-### `restack repo list`
-
-List all tracked repositories.
-
-```bash
-restack repo list
-```
-
-### `restack repo detect`
-
-Auto-discover git repos in workspace subdirectories (1-2 levels deep).
-
-```bash
-restack repo detect
-```
-
-Walks subdirectories, filters already-tracked repos, detects provider from remote URL, and adds new repos with default environments.
-
 ## Topic Branch Tracking
 
 ### `restack topic track`
 
-Start tracking a branch as a topic.
+Start tracking a branch as a topic. Use this for power-user cases when you need to track a branch that was excluded by discovery patterns.
 
 ```bash
 restack topic track <BRANCH> --repo <REPO_ID>
@@ -100,6 +99,18 @@ Stop tracking a topic.
 
 ```bash
 restack topic untrack <ID> --repo <REPO_ID>
+```
+
+**Arguments:**
+- `ID` (required): Topic ID or branch name
+- `--repo` (required): Repo ID
+
+### `restack topic archive`
+
+Archive a topic (hide from board, mark as closed).
+
+```bash
+restack topic archive <ID> --repo <REPO_ID>
 ```
 
 **Arguments:**
@@ -129,19 +140,6 @@ restack topic status <ID> --repo <REPO_ID>
 **Arguments:**
 - `ID` (required): Topic ID or branch name
 - `--repo` (required): Repo ID
-
-### `restack topic sync`
-
-Import topics from provider pull requests.
-
-```bash
-restack topic sync --repo <REPO_ID>
-```
-
-**Arguments:**
-- `--repo` (required): Repo ID
-
-Requires provider configuration (GitHub or Azure DevOps).
 
 ## Environment Management
 
@@ -174,12 +172,11 @@ restack env add production --branch master --repo repo_01JQAZ... --ordinal 2
 List environments.
 
 ```bash
-restack env list [--repo REPO_ID] [--all-repos]
+restack env list [--repo REPO_ID]
 ```
 
 **Arguments:**
 - `--repo`: Filter by repo ID
-- `--all-repos`: List environments across all tracked repos (grouped by repo)
 
 ### `restack env status`
 
@@ -196,57 +193,37 @@ restack env status <ENV_ID>
 
 ### `restack promote to`
 
-Add a topic to an environment.
+Add a topic to an environment and trigger rebuild.
 
 ```bash
-restack promote to <TOPIC> <ENV> --repo <REPO_ID> [--dry-run]
+restack promote to <TOPIC> <ENV> --repo <REPO_ID>
 ```
 
 **Arguments:**
 - `TOPIC` (required): Topic ID or branch name
 - `ENV` (required): Target environment name
 - `--repo` (required): Repo ID
-- `--dry-run`: Preview without making changes
 
 **Example:**
 ```bash
 restack promote to feature/login dev --repo repo_01JQAZ...
 ```
 
+**Conflict Handling:**
+If the topic causes a merge conflict during rebuild, it's automatically removed from the environment and returned to the "Unassigned" lane in the UI. A toast notification alerts the user.
+
 ### `restack promote from`
 
-Remove a topic from an environment.
+Remove a topic from an environment and trigger rebuild.
 
 ```bash
-restack promote from <TOPIC> <ENV> --repo <REPO_ID> [--dry-run]
+restack promote from <TOPIC> <ENV> --repo <REPO_ID>
 ```
 
 **Arguments:**
 - `TOPIC` (required): Topic ID or branch name
 - `ENV` (required): Environment name to remove from
 - `--repo` (required): Repo ID
-- `--dry-run`: Preview without making changes
-
-### `restack promote auto`
-
-Auto-promote CI-passed topics to environments with `auto_promote` enabled.
-
-```bash
-restack promote auto
-```
-
-Checks CI status for all topics across all repos. Promotes topics with `ci_status == passed` into any `auto_promote` environment they're not already in. Triggers rebuilds for changed environments.
-
-**Output:**
-```json
-{
-  "refreshedTopics": 12,
-  "promoted": [
-    { "topic": "feature/login", "env": "dev", "repo": "api" }
-  ],
-  "envsChanged": ["dev"]
-}
-```
 
 ## Rebuild
 
@@ -255,12 +232,11 @@ Checks CI status for all topics across all repos. Promotes topics with `ci_statu
 Rebuild a single environment.
 
 ```bash
-restack rebuild env <ENV_ID> [--dry-run] [--interactive]
+restack rebuild env <ENV_ID> [--interactive]
 ```
 
 **Arguments:**
 - `ENV_ID` (required): Environment ID
-- `--dry-run`: Preview without pushing
 - `-i, --interactive`: Prompt on conflicts instead of auto-skipping
 
 **Rebuild algorithm:**
@@ -282,189 +258,11 @@ restack rebuild env <ENV_ID> [--dry-run] [--interactive]
 Rebuild all environments for a repo.
 
 ```bash
-restack rebuild all [REPO_ID] [--dry-run] [--interactive] [--all-repos]
+restack rebuild all <REPO_ID>
 ```
 
 **Arguments:**
-- `REPO_ID`: Repo ID (required unless `--all-repos`)
-- `--dry-run`: Preview without pushing
-- `-i, --interactive`: Prompt on conflicts
-- `--all-repos`: Rebuild all environments across all tracked repos
-
-### `restack rebuild watch`
-
-Polling mode: periodically run `promote auto` and rebuild changed environments.
-
-```bash
-restack rebuild watch [--interval SECONDS]
-```
-
-**Arguments:**
-- `--interval`: Poll interval in seconds (default: 60)
-
-Runs until Ctrl+C (graceful shutdown). Returns summary on exit:
-```json
-{
-  "cycles": 15,
-  "totalPromoted": 3,
-  "stopped": "graceful"
-}
-```
-
-## Release Management
-
-### `restack release prepare`
-
-Preview the next release (version bump + changelog from conventional commits).
-
-```bash
-restack release prepare [--bump TYPE]
-```
-
-**Arguments:**
-- `--bump`: Override bump type (`major`, `minor`, `patch`). Auto-detected from commits if omitted.
-
-### `restack release cut`
-
-Cut a release: tag, push, preserve maint branch, graduate merged topics.
-
-```bash
-restack release cut [--bump TYPE]
-```
-
-**Arguments:**
-- `--bump`: Override bump type
-
-Sequence: prepare → tag → push tag → update `maint` → preserve as `maint-X.Y` → graduate topics → rebuild environments.
-
-### `restack release hotfix`
-
-Create a hotfix branch from maint.
-
-```bash
-restack release hotfix [--base BRANCH]
-```
-
-**Arguments:**
-- `--base`: Maint branch to hotfix from (default: `maint`)
-
-### `restack release hotfix-release`
-
-Release a hotfix: patch bump, tag, push, merge maint to master.
-
-```bash
-restack release hotfix-release [--base BRANCH]
-```
-
-**Arguments:**
-- `--base`: Maint branch (default: `maint`)
-
-## CI / Pipeline
-
-### `restack ci status`
-
-Show CI status for all topics in a repo.
-
-```bash
-restack ci status --repo <REPO_ID>
-```
-
-### `restack ci generate`
-
-Generate CI workflow files for the repo's provider.
-
-```bash
-restack ci generate --repo <REPO_ID> [--stdout] [-o DIR]
-```
-
-**Arguments:**
-- `--repo` (required): Repo ID
-- `--stdout`: Print to stdout instead of writing files
-- `-o, --output`: Output directory (default: current directory)
-
-### `restack pipeline trigger`
-
-Trigger a CI pipeline.
-
-```bash
-restack pipeline trigger --repo <REPO_ID> --branch <BRANCH> [--name WORKFLOW]
-```
-
-**Arguments:**
-- `--repo` (required): Repo ID
-- `--branch` (required): Branch to build
-- `--name`: Pipeline/workflow name (optional)
-
-## Pull Requests
-
-### `restack pr create`
-
-Create a pull request via the provider.
-
-```bash
-restack pr create \
-  --repo <REPO_ID> \
-  --head <BRANCH> \
-  --base <BRANCH> \
-  --title "Title" \
-  [--body "Description"] \
-  [--draft]
-```
-
-**Arguments:**
-- `--repo` (required): Repo ID
-- `--head` (required): Source branch
-- `--base` (required): Target branch
-- `--title` (required): PR title
-- `--body`: PR description
-- `--draft`: Create as draft PR
-
-### `restack pr merge`
-
-Merge a pull request.
-
-```bash
-restack pr merge <PR_NUMBER> \
-  --repo <REPO_ID> \
-  [--strategy merge|squash|rebase] \
-  [--delete-branch]
-```
-
-**Arguments:**
-- `PR_NUMBER` (required): PR number
-- `--repo` (required): Repo ID
-- `--strategy`: Merge strategy (default: `squash`)
-- `--delete-branch`: Delete source branch after merge
-
-## Branch Protection
-
-### `restack protection set`
-
-Set branch protection rules.
-
-```bash
-restack protection set \
-  --repo <REPO_ID> \
-  --branch <BRANCH> \
-  [--checks CHECK1,CHECK2] \
-  [--require-pr] \
-  [--min-approvals N]
-```
-
-**Arguments:**
-- `--repo` (required): Repo ID
-- `--branch` (required): Branch to protect
-- `--checks`: Required CI checks (comma-separated)
-- `--require-pr`: Require PR reviews
-- `--min-approvals`: Minimum approvals (default: 1)
-
-### `restack protection envs`
-
-Apply protection rules to all environment branches for a repo.
-
-```bash
-restack protection envs --repo <REPO_ID>
-```
+- `REPO_ID`: Repo ID
 
 ## Shell Completions
 

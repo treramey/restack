@@ -2,7 +2,7 @@ use clap::Subcommand;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::core::{provider_service, repo_service, topic_service};
+use crate::core::{discovery_service, repo_service, topic_service};
 use crate::error::Result;
 use crate::id::RepoId;
 use crate::types::Topic;
@@ -19,6 +19,14 @@ pub enum TopicCommand {
     },
     /// Untrack a topic
     Untrack {
+        /// Topic ID or branch name
+        id: String,
+        /// Repo ID
+        #[arg(long)]
+        repo: String,
+    },
+    /// Archive a topic (hide from board, mark as closed)
+    Archive {
         /// Topic ID or branch name
         id: String,
         /// Repo ID
@@ -42,12 +50,8 @@ pub enum TopicCommand {
         #[arg(long)]
         repo: String,
     },
-    /// Sync topics from pull requests
-    Sync {
-        /// Repo ID
-        #[arg(long)]
-        repo: String,
-    },
+    /// List topic-environment assignments
+    Envs,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,18 +65,34 @@ struct MultiRepoTopics {
 pub fn handle(conn: &Connection, cmd: &TopicCommand) -> Result<String> {
     match cmd {
         TopicCommand::Track { branch, repo } => {
-            let repo_id: RepoId = repo.parse().map_err(|_| {
-                crate::error::RestackError::RepoNotFound(RepoId::new())
-            })?;
+            let repo_id: RepoId = repo
+                .parse()
+                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
             let topic = topic_service::track_topic(conn, &repo_id, branch)?;
             Ok(serde_json::to_string_pretty(&topic)?)
         }
         TopicCommand::Untrack { id, repo } => {
-            let repo_id: RepoId = repo.parse().map_err(|_| {
-                crate::error::RestackError::RepoNotFound(RepoId::new())
-            })?;
+            let repo_id: RepoId = repo
+                .parse()
+                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
             topic_service::untrack_topic(conn, id, &repo_id)?;
             Ok(serde_json::json!({ "deleted": true }).to_string())
+        }
+        TopicCommand::Archive { id, repo } => {
+            let repo_id: RepoId = repo
+                .parse()
+                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
+            let topic = crate::db::topic_repo::get_topic_by_branch(conn, &repo_id, id)?
+                .or_else(|| {
+                    id.parse()
+                        .ok()
+                        .and_then(|tid| crate::db::topic_repo::get_topic(conn, &tid).ok())
+                })
+                .ok_or_else(|| {
+                    crate::error::RestackError::TopicNotFound(id.parse().unwrap_or_default())
+                })?;
+            let archived = discovery_service::archive_topic(conn, &topic.id)?;
+            Ok(serde_json::to_string_pretty(&archived)?)
         }
         TopicCommand::List { repo, all_repos } => {
             if *all_repos {
@@ -88,24 +108,25 @@ pub fn handle(conn: &Connection, cmd: &TopicCommand) -> Result<String> {
                 }
                 Ok(serde_json::to_string_pretty(&results)?)
             } else {
-                let repo_id = repo.as_ref().map(|r| r.parse::<RepoId>()).transpose().map_err(|_| {
-                    crate::error::RestackError::RepoNotFound(RepoId::new())
-                })?;
+                let repo_id = repo
+                    .as_ref()
+                    .map(|r| r.parse::<RepoId>())
+                    .transpose()
+                    .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
                 let topics = topic_service::list_topics(conn, repo_id.as_ref())?;
                 Ok(serde_json::to_string_pretty(&topics)?)
             }
         }
         TopicCommand::Status { id, repo } => {
-            let repo_id: RepoId = repo.parse().map_err(|_| {
-                crate::error::RestackError::RepoNotFound(RepoId::new())
-            })?;
+            let repo_id: RepoId = repo
+                .parse()
+                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
             let status = topic_service::get_topic_status(conn, id, &repo_id)?;
             Ok(serde_json::to_string_pretty(&status)?)
         }
-        TopicCommand::Sync { repo } => {
-            let repo = provider_service::load_repo(conn, repo)?;
-            let result = provider_service::sync_topics_from_prs(conn, &repo)?;
-            Ok(serde_json::to_string_pretty(&result)?)
+        TopicCommand::Envs => {
+            let topic_envs = crate::db::topic_env_repo::list_all_topic_environments(conn)?;
+            Ok(serde_json::to_string_pretty(&topic_envs)?)
         }
     }
 }

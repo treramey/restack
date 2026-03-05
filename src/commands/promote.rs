@@ -51,9 +51,9 @@ pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Resu
             repo,
             dry_run,
         } => {
-            let repo_id: RepoId = repo.parse().map_err(|_| {
-                crate::error::RestackError::InvalidId(repo.clone())
-            })?;
+            let repo_id: RepoId = repo
+                .parse()
+                .map_err(|_| crate::error::RestackError::InvalidId(repo.clone()))?;
             let result =
                 promote_service::promote_to(conn, topic, env, &repo_id, repo_path, *dry_run)?;
             Ok(serde_json::to_string_pretty(&result)?)
@@ -64,9 +64,9 @@ pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Resu
             repo,
             dry_run,
         } => {
-            let repo_id: RepoId = repo.parse().map_err(|_| {
-                crate::error::RestackError::InvalidId(repo.clone())
-            })?;
+            let repo_id: RepoId = repo
+                .parse()
+                .map_err(|_| crate::error::RestackError::InvalidId(repo.clone()))?;
             let result =
                 promote_service::demote_from(conn, topic, env, &repo_id, repo_path, *dry_run)?;
             Ok(serde_json::to_string_pretty(&result)?)

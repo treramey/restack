@@ -112,12 +112,8 @@ fn merge_hotfix_to_master(repo_path: &Path, maint_branch: &str) -> Result<bool> 
             let master_sha = git::resolve_ref(repo_path, "origin/master")?;
             let maint_sha = git::resolve_ref(repo_path, &maint_ref)?;
             let msg = format!("Merge branch '{maint_branch}' into master (hotfix)");
-            let merge_sha = git::commit_tree(
-                repo_path,
-                &tree_oid,
-                &[&master_sha, &maint_sha],
-                &msg,
-            )?;
+            let merge_sha =
+                git::commit_tree(repo_path, &tree_oid, &[&master_sha, &maint_sha], &msg)?;
             git::update_ref(repo_path, "master", &merge_sha)?;
             git::push(repo_path, "master")?;
             Ok(true)

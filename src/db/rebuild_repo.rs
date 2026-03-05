@@ -62,6 +62,20 @@ pub fn get_last_rebuild(conn: &Connection, env_id: &EnvId) -> Result<Option<Rebu
     }
 }
 
+pub fn list_rebuilds(conn: &Connection) -> Result<Vec<Rebuild>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, env_id, started_at, completed_at, status, topics_merged, topics_conflicted, result_sha FROM rebuilds ORDER BY started_at DESC",
+    )?;
+
+    let rows = stmt.query_map([], |row| map_rebuild_row(row))?;
+
+    let mut rebuilds = Vec::new();
+    for row in rows {
+        rebuilds.push(row?);
+    }
+    Ok(rebuilds)
+}
+
 fn map_rebuild_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Rebuild> {
     let status_str: String = row.get(4)?;
     let status = match status_str.as_str() {

@@ -3,14 +3,14 @@
  * Positioned at bottom, resizable via drag handle.
  */
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useMemo } from "react";
 import {
   useUIStore,
   clampPanelHeight,
   PANEL_HEIGHT_MIN,
   PANEL_HEIGHT_MAX_VH,
 } from "../lib/store.js";
-import { useTopics, useEnvironments, useTopicEnvironments } from "../lib/queries.js";
+import { useTopics, useEnvironments, useTopicEnvironments, useRepos, useConflicts } from "../lib/queries.js";
 
 const COLLAPSED_HEIGHT = 40;
 
@@ -24,9 +24,15 @@ export function DetailPanel() {
   const { data: topics } = useTopics();
   const { data: environments } = useEnvironments();
   const { data: topicEnvs } = useTopicEnvironments();
+  const { data: repos } = useRepos();
+  const { data: conflicts } = useConflicts();
 
   const selectedTopic = selectedTopicId
     ? topics?.find((t) => t.id === selectedTopicId) ?? null
+    : null;
+
+  const selectedRepo = selectedTopic
+    ? repos?.find((r) => r.id === selectedTopic.repoId) ?? null
     : null;
 
   const topicEnvIds = selectedTopicId
@@ -34,6 +40,26 @@ export function DetailPanel() {
     : [];
 
   const topicEnvironments = environments?.filter((e) => topicEnvIds.includes(e.id)) ?? [];
+
+  const topicConflicts = useMemo(() => {
+    if (!selectedTopicId || !conflicts) return [];
+    return conflicts.filter((c) => c.topicId === selectedTopicId && !c.resolved);
+  }, [selectedTopicId, conflicts]);
+
+  const age = useMemo(() => {
+    if (!selectedTopic) return null;
+    const created = new Date(selectedTopic.createdAt);
+    const now = new Date();
+    const diffMs = now.getTime() - created.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+    
+    if (diffDays > 0) return `${diffDays}d ${diffHours % 24}h`;
+    if (diffHours > 0) return `${diffHours}h ${diffMins % 60}m`;
+    if (diffMins > 0) return `${diffMins}m`;
+    return "just now";
+  }, [selectedTopic]);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
@@ -169,65 +195,90 @@ export function DetailPanel() {
         >
           {selectedTopic ? (
             <div className="h-full overflow-y-auto p-4 space-y-4">
-              {/* Topic info */}
-              <div className="space-y-2">
-                <h3 className="text-sm font-mono font-bold text-text-primary">
-                  {selectedTopic.branch}
-                </h3>
-                <div className="flex items-center gap-3 text-xs font-mono">
-                  <StatusBadge label={selectedTopic.status} variant={topicStatusVariant(selectedTopic.status)} />
-                  {selectedTopic.ciStatus && (
-                    <StatusBadge label={`CI: ${selectedTopic.ciStatus}`} variant={ciStatusVariant(selectedTopic.ciStatus)} />
-                  )}
-                  {selectedTopic.prUrl && (
-                    <a
-                      href={selectedTopic.prUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-accent hover:underline"
-                    >
-                      PR #{selectedTopic.prId}
-                    </a>
-                  )}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Branch</label>
+                  <div className="text-sm font-mono text-text-primary truncate">{selectedTopic.branch}</div>
                 </div>
-                {(selectedTopic.ciUrl || selectedTopic.lastCiCheck) && (
-                  <div className="flex items-center gap-3 text-xs font-mono text-text-dim">
-                    {selectedTopic.ciUrl && (
-                      <a
-                        href={selectedTopic.ciUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-accent hover:underline"
-                      >
-                        CI Details
-                      </a>
-                    )}
-                    {selectedTopic.lastCiCheck && (
-                      <span>
-                        Last checked: {new Date(selectedTopic.lastCiCheck).toLocaleString()}
-                      </span>
-                    )}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Repo</label>
+                  <div className="text-sm font-mono text-text-primary">{selectedRepo?.name ?? "—"}</div>
+                </div>
+                {selectedTopic.status !== "active" && (
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Status</label>
+                    <StatusBadge label={selectedTopic.status} variant={topicStatusVariant(selectedTopic.status)} />
                   </div>
                 )}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Age</label>
+                  <div className="text-sm font-mono text-text-dim">{age}</div>
+                </div>
               </div>
 
-              {/* Environments */}
-              {topicEnvironments.length > 0 && (
-                <div className="space-y-1">
-                  <h4 className="text-xs font-mono text-text-dim uppercase tracking-wider">
-                    Environments
-                  </h4>
+              <div className="space-y-1">
+                <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Environment</label>
+                {topicEnvironments.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {topicEnvironments
                       .sort((a, b) => a.ordinal - b.ordinal)
                       .map((env) => (
                         <span
                           key={env.id}
-                          className="text-xs font-mono px-2 py-1 rounded bg-surface-primary border border-border text-text-muted"
+                          className="text-xs font-mono px-2 py-1 rounded bg-accent-subtle text-accent border border-accent/40"
                         >
                           {env.name}
+                          {env.branch !== env.name && (
+                            <span className="text-text-dim ml-1">({env.branch})</span>
+                          )}
                         </span>
                       ))}
+                  </div>
+                ) : (
+                  <div className="text-xs font-mono text-text-dim italic">
+                    Not promoted to any environment
+                  </div>
+                )}
+              </div>
+
+              {selectedTopic.ciStatus && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">CI Status</label>
+                  <div className="flex items-center gap-3">
+                    <StatusBadge label={selectedTopic.ciStatus} variant={ciStatusVariant(selectedTopic.ciStatus)} />
+                    {selectedTopic.ciUrl && (
+                      <a
+                        href={selectedTopic.ciUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-mono text-accent hover:underline"
+                      >
+                        View CI →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {selectedTopic.prUrl && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Pull Request</label>
+                  <a
+                    href={selectedTopic.prUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-mono text-accent hover:underline"
+                  >
+                    #{selectedTopic.prId} → {selectedTopic.prUrl.split("/").slice(-2).join("/")}
+                  </a>
+                </div>
+              )}
+
+              {topicConflicts.length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono text-status-conflict uppercase tracking-wider">Conflicts</label>
+                  <div className="text-xs font-mono text-status-conflict">
+                    {topicConflicts.length} unresolved conflict{topicConflicts.length > 1 ? "s" : ""}
                   </div>
                 </div>
               )}

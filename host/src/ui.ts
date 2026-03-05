@@ -1,12 +1,34 @@
 /**
- * UI Server - Hono HTTP server for Restack
+ * UI Server - Hono HTTP server for Restack with WebSocket support
  */
 import { serve } from "@hono/node-server";
+import { createNodeWebSocket } from "@hono/node-ws";
 import { Hono, type Context } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { StatusCode } from "hono/utils/http-status";
 import { callCli } from "./cli.js";
 import { CliError } from "./types.js";
+
+type WsClient = { send: (data: string) => void; readyState: number };
+const wsClients = new Set<WsClient>();
+
+export type WsEvent = {
+  type: "invalidate";
+  queryKeys: string[][];
+};
+
+function broadcast(event: WsEvent) {
+  const data = JSON.stringify(event);
+  for (const client of wsClients) {
+    if (client.readyState === 1) {
+      client.send(data);
+    }
+  }
+}
+
+function broadcastInvalidate(...queryKeys: string[][]) {
+  broadcast({ type: "invalidate", queryKeys });
+}
 
 interface ApiError {
   error: string;
@@ -89,32 +111,6 @@ function createRepoRoutes() {
         return handleCliError(c, err);
       }
     })
-
-    .post("/", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        const raw: unknown = await c.req.json();
-        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
-        body = raw;
-      } catch {
-        return c.json({ error: "Invalid JSON body" }, 400);
-      }
-
-      const path = requireString(body, "path");
-      if (!path) return c.json({ error: "path is required" }, 400);
-
-      const args = ["repo", "add", path];
-      const name = requireString(body, "name");
-      if (name) args.push("--name", name);
-
-      try {
-        const result = await callCli(args);
-        return c.json(result, 201);
-      } catch (err) {
-        return handleCliError(c, err);
-      }
-    })
-
     .delete("/:id", async (c) => {
       const id = c.req.param("id");
 
@@ -175,25 +171,6 @@ function createTopicRoutes() {
 
       try {
         const result = await callCli(["topic", "untrack", "--repo", repo, id]);
-        return c.json(result);
-      } catch (err) {
-        return handleCliError(c, err);
-      }
-    })
-
-    .post("/sync", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        const raw: unknown = await c.req.json();
-        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
-        body = raw;
-      } catch {
-        return c.json({ error: "Invalid JSON body" }, 400);
-      }
-      const repo = requireString(body, "repo");
-      if (!repo) return c.json({ error: "repo is required" }, 400);
-      try {
-        const result = await callCli(["topic", "sync", "--repo", repo]);
         return c.json(result);
       } catch (err) {
         return handleCliError(c, err);
@@ -290,17 +267,39 @@ function createPromoteRoutes() {
         return c.json({ error: "Invalid JSON body" }, 400);
       }
 
-      const topic = requireString(body, "topic");
-      const env = requireString(body, "env");
-      const repo = requireString(body, "repo");
-      if (!topic) return c.json({ error: "topic is required" }, 400);
-      if (!env) return c.json({ error: "env is required" }, 400);
-      if (!repo) return c.json({ error: "repo is required" }, 400);
+      const topicId = requireString(body, "topicId");
+      const envId = requireString(body, "envId");
+      if (!topicId) return c.json({ error: "topicId is required" }, 400);
+      if (!envId) return c.json({ error: "envId is required" }, 400);
 
       try {
+        const reposResult = await callCli(["repo", "list"]);
+        const repos = reposResult as Array<{ id: string }>;
+        let repoId: string | undefined;
+        let topicBranch: string | undefined;
+
+        for (const repo of repos) {
+          const topicsResult = await callCli(["topic", "list", "--repo", repo.id]);
+          const topics = topicsResult as Array<{ id: string; branch: string }>;
+          const topic = topics.find((t) => t.id === topicId);
+          if (topic) {
+            repoId = repo.id;
+            topicBranch = topic.branch;
+            break;
+          }
+        }
+
+        if (!repoId) return c.json({ error: "Topic not found" }, 404);
+
+        const envResult = await callCli(["env", "list", "--repo", repoId]);
+        const envs = envResult as Array<{ id: string; name: string }>;
+        const env = envs.find((e) => e.id === envId);
+        if (!env) return c.json({ error: "Environment not found" }, 404);
+
         const result = await callCli([
-          "promote", "to", "--repo", repo, topic, env,
+          "promote", "to", "--repo", repoId, topicId, env.name,
         ]);
+        broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"], ["conflicts"]);
         return c.json(result);
       } catch (err) {
         return handleCliError(c, err);
@@ -317,17 +316,36 @@ function createPromoteRoutes() {
         return c.json({ error: "Invalid JSON body" }, 400);
       }
 
-      const topic = requireString(body, "topic");
-      const env = requireString(body, "env");
-      const repo = requireString(body, "repo");
-      if (!topic) return c.json({ error: "topic is required" }, 400);
-      if (!env) return c.json({ error: "env is required" }, 400);
-      if (!repo) return c.json({ error: "repo is required" }, 400);
+      const topicId = requireString(body, "topicId");
+      const envId = requireString(body, "envId");
+      if (!topicId) return c.json({ error: "topicId is required" }, 400);
+      if (!envId) return c.json({ error: "envId is required" }, 400);
 
       try {
+        const reposResult = await callCli(["repo", "list"]);
+        const repos = reposResult as Array<{ id: string }>;
+        let repoId: string | undefined;
+
+        for (const repo of repos) {
+          const topicsResult = await callCli(["topic", "list", "--repo", repo.id]);
+          const topics = topicsResult as Array<{ id: string }>;
+          if (topics.find((t) => t.id === topicId)) {
+            repoId = repo.id;
+            break;
+          }
+        }
+
+        if (!repoId) return c.json({ error: "Topic not found" }, 404);
+
+        const envResult = await callCli(["env", "list", "--repo", repoId]);
+        const envs = envResult as Array<{ id: string; name: string }>;
+        const env = envs.find((e) => e.id === envId);
+        if (!env) return c.json({ error: "Environment not found" }, 404);
+
         const result = await callCli([
-          "promote", "from", "--repo", repo, topic, env,
+          "promote", "from", "--repo", repoId, topicId, env.name,
         ]);
+        broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"]);
         return c.json(result);
       } catch (err) {
         return handleCliError(c, err);
@@ -355,6 +373,7 @@ function createRebuildRoutes() {
 
       try {
         const result = await callCli(["rebuild", "all", repo]);
+        broadcastInvalidate(["rebuilds"], ["topics"], ["conflicts"]);
         return c.json(result);
       } catch (err) {
         return handleCliError(c, err);
@@ -366,6 +385,7 @@ function createRebuildRoutes() {
 
       try {
         const result = await callCli(["rebuild", "env", env]);
+        broadcastInvalidate(["rebuilds"], ["topics"], ["conflicts"]);
         return c.json(result);
       } catch (err) {
         return handleCliError(c, err);
@@ -373,201 +393,64 @@ function createRebuildRoutes() {
     });
 }
 
-/**
- * CI routes
- */
-function createCiRoutes() {
-  return new Hono()
-    .get("/status", async (c) => {
-      const repo = c.req.query("repo");
-      if (!repo) return c.json({ error: "repo query param required" }, 400);
-      try {
-        const result = await callCli(["ci", "status", "--repo", repo]);
-        return c.json(result);
-      } catch (err) {
-        return handleCliError(c, err);
-      }
-    })
-    .post("/generate", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        const raw: unknown = await c.req.json();
-        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
-        body = raw;
-      } catch {
-        return c.json({ error: "Invalid JSON body" }, 400);
-      }
-      const repo = requireString(body, "repo");
-      if (!repo) return c.json({ error: "repo is required" }, 400);
-      try {
-        const result = await callCli(["ci", "generate", "--repo", repo]);
-        return c.json(result);
-      } catch (err) {
-        return handleCliError(c, err);
-      }
-    });
+function createRefreshRoutes() {
+  return new Hono().post("/", async (c) => {
+    let body: Record<string, unknown>;
+    try {
+      const raw: unknown = await c.req.json();
+      if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
+      body = raw;
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const args = ["refresh"];
+    const repo = requireString(body, "repo");
+    if (repo) {
+      args.push("--repo", repo);
+    }
+
+    try {
+      const result = await callCli(args);
+      broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"], ["conflicts"]);
+      return c.json(result);
+    } catch (err) {
+      return handleCliError(c, err);
+    }
+  });
 }
 
-/**
- * PR management routes
- */
-function createPrRoutes() {
-  return new Hono()
-    .post("/create", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        const raw: unknown = await c.req.json();
-        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
-        body = raw;
-      } catch {
-        return c.json({ error: "Invalid JSON body" }, 400);
-      }
-
-      const repo = requireString(body, "repo");
-      const head = requireString(body, "head");
-      const base = requireString(body, "base");
-      const title = requireString(body, "title");
-      if (!repo) return c.json({ error: "repo is required" }, 400);
-      if (!head) return c.json({ error: "head is required" }, 400);
-      if (!base) return c.json({ error: "base is required" }, 400);
-      if (!title) return c.json({ error: "title is required" }, 400);
-
-      const args = ["pr", "create", "--repo", repo, "--head", head, "--base", base, "--title", title];
-      const bodyText = requireString(body, "body");
-      if (bodyText) args.push("--body", bodyText);
-      const draft = requireBool(body, "draft");
-      if (draft) args.push("--draft");
-
-      try {
-        const result = await callCli(args);
-        return c.json(result, 201);
-      } catch (err) {
-        return handleCliError(c, err);
-      }
-    })
-
-    .post("/merge", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        const raw: unknown = await c.req.json();
-        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
-        body = raw;
-      } catch {
-        return c.json({ error: "Invalid JSON body" }, 400);
-      }
-
-      const repo = requireString(body, "repo");
-      const prNumber = requireString(body, "prNumber");
-      if (!repo) return c.json({ error: "repo is required" }, 400);
-      if (!prNumber) return c.json({ error: "prNumber is required" }, 400);
-
-      const args = ["pr", "merge", "--repo", repo, prNumber];
-      const strategy = requireString(body, "strategy");
-      if (strategy) args.push("--strategy", strategy);
-      const deleteBranch = requireBool(body, "deleteBranch");
-      if (deleteBranch) args.push("--delete-branch");
-
-      try {
-        const result = await callCli(args);
-        return c.json(result);
-      } catch (err) {
-        return handleCliError(c, err);
-      }
-    });
+function createTopicEnvironmentRoutes() {
+  return new Hono().get("/", async (c) => {
+    try {
+      const result = await callCli(["topic", "envs"]);
+      return c.json(result);
+    } catch (err) {
+      return handleCliError(c, err);
+    }
+  });
 }
 
-/**
- * Branch protection routes
- */
-function createProtectionRoutes() {
-  return new Hono()
-    .post("/set", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        const raw: unknown = await c.req.json();
-        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
-        body = raw;
-      } catch {
-        return c.json({ error: "Invalid JSON body" }, 400);
-      }
-
-      const repo = requireString(body, "repo");
-      const branch = requireString(body, "branch");
-      if (!repo) return c.json({ error: "repo is required" }, 400);
-      if (!branch) return c.json({ error: "branch is required" }, 400);
-
-      const args = ["protection", "set", "--repo", repo, "--branch", branch];
-      const checks = body["checks"];
-      if (Array.isArray(checks)) {
-        const checkStrs = checks.filter((c): c is string => typeof c === "string");
-        if (checkStrs.length > 0) args.push("--checks", checkStrs.join(","));
-      }
-      const requirePr = requireBool(body, "requirePr");
-      if (requirePr) args.push("--require-pr");
-      const minApprovals = requireNumber(body, "minApprovals");
-      if (minApprovals !== undefined) args.push("--min-approvals", String(minApprovals));
-
-      try {
-        const result = await callCli(args);
-        return c.json(result);
-      } catch (err) {
-        return handleCliError(c, err);
-      }
-    })
-
-    .post("/envs", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        const raw: unknown = await c.req.json();
-        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
-        body = raw;
-      } catch {
-        return c.json({ error: "Invalid JSON body" }, 400);
-      }
-
-      const repo = requireString(body, "repo");
-      if (!repo) return c.json({ error: "repo is required" }, 400);
-
-      try {
-        const result = await callCli(["protection", "envs", "--repo", repo]);
-        return c.json(result);
-      } catch (err) {
-        return handleCliError(c, err);
-      }
-    });
+function createRebuildsRoutes() {
+  return new Hono().get("/", async (c) => {
+    try {
+      const result = await callCli(["rebuild", "list"]);
+      return c.json(result);
+    } catch (err) {
+      return handleCliError(c, err);
+    }
+  });
 }
 
-/**
- * Pipeline routes
- */
-function createPipelineRoutes() {
-  return new Hono()
-    .post("/trigger", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        const raw: unknown = await c.req.json();
-        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
-        body = raw;
-      } catch {
-        return c.json({ error: "Invalid JSON body" }, 400);
-      }
-
-      const repo = requireString(body, "repo");
-      const branch = requireString(body, "branch");
-      if (!repo) return c.json({ error: "repo is required" }, 400);
-      if (!branch) return c.json({ error: "branch is required" }, 400);
-
-      const args = ["pipeline", "trigger", "--repo", repo, "--branch", branch];
-      const name = requireString(body, "name");
-      if (name) args.push("--name", name);
-
-      try {
-        const result = await callCli(args);
-        return c.json(result);
-      } catch (err) {
-        return handleCliError(c, err);
-      }
-    });
+function createConflictsRoutes() {
+  return new Hono().get("/", async (c) => {
+    try {
+      const result = await callCli(["conflicts", "list"]);
+      return c.json(result);
+    } catch (err) {
+      return handleCliError(c, err);
+    }
+  });
 }
 
 export interface UiServerConfig {
@@ -575,36 +458,61 @@ export interface UiServerConfig {
   staticRoot: string;
 }
 
-/**
- * Create UI app with API routes and static file serving
- */
 export function createUiApp(staticRoot: string) {
-  const api = new Hono()
+  const app = new Hono();
+  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+
+  app.get(
+    "/ws",
+    upgradeWebSocket(() => ({
+      onOpen(_e, ws) {
+        wsClients.add(ws as unknown as WsClient);
+      },
+      onClose(_e, ws) {
+        wsClients.delete(ws as unknown as WsClient);
+      },
+    }))
+  );
+
+  app
     .get("/health", (c) => c.json({ status: "ok" }))
+    .post("/api/cli/notify", async (c) => {
+      let body: Record<string, unknown>;
+      try {
+        const raw: unknown = await c.req.json();
+        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
+        body = raw;
+      } catch {
+        return c.json({ error: "Invalid JSON body" }, 400);
+      }
+
+      const queryKeys = body.queryKeys as string[][] | undefined;
+      if (queryKeys && Array.isArray(queryKeys)) {
+        broadcastInvalidate(...queryKeys);
+      }
+      return c.json({ broadcasted: true });
+    })
     .route("/api/repos", createRepoRoutes())
     .route("/api/topics", createTopicRoutes())
     .route("/api/envs", createEnvRoutes())
+    .route("/api/environments", createEnvRoutes())
     .route("/api/promote", createPromoteRoutes())
     .route("/api/rebuild", createRebuildRoutes())
-    .route("/api/ci", createCiRoutes())
-    .route("/api/pr", createPrRoutes())
-    .route("/api/protection", createProtectionRoutes())
-    .route("/api/pipeline", createPipelineRoutes())
-    .all("/api/*", (c) => c.json({ error: "Not found" }, 404));
-
-  return new Hono()
-    .route("/", api)
+    .route("/api/rebuilds", createRebuildsRoutes())
+    .route("/api/topic-environments", createTopicEnvironmentRoutes())
+    .route("/api/conflicts", createConflictsRoutes())
+    .route("/api/refresh", createRefreshRoutes())
+    .all("/api/*", (c) => c.json({ error: "Not found" }, 404))
     .use("/*", serveStatic({ root: staticRoot }))
     .get("/*", serveStatic({ root: staticRoot, path: "index.html" }));
+
+  return { app, injectWebSocket };
 }
 
-/**
- * Start UI server
- */
 export async function startUiServer(config: UiServerConfig): Promise<void> {
-  const app = createUiApp(config.staticRoot);
+  const { app, injectWebSocket } = createUiApp(config.staticRoot);
 
-  serve(
+  const server = serve(
     {
       fetch: app.fetch,
       port: config.port,
@@ -613,4 +521,6 @@ export async function startUiServer(config: UiServerConfig): Promise<void> {
       console.log(`Restack UI: http://localhost:${info.port}`);
     }
   );
+
+  injectWebSocket(server);
 }

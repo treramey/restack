@@ -19,6 +19,8 @@ pub struct WorkspaceConfig {
     pub release: ReleaseSection,
     #[serde(default)]
     pub provider: ProviderSection,
+    #[serde(default = "DiscoverySection::default")]
+    pub discovery: DiscoverySection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,6 +152,66 @@ impl Default for ProviderSection {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoverySection {
+    #[serde(default = "default_exclude_patterns")]
+    pub exclude_patterns: Vec<String>,
+    #[serde(default = "default_true")]
+    pub exclude_env_branches: bool,
+}
+
+fn default_exclude_patterns() -> Vec<String> {
+    vec![
+        "main".to_string(),
+        "master".to_string(),
+        "staging".to_string(),
+        "dev".to_string(),
+        "develop".to_string(),
+        "production".to_string(),
+        "maint".to_string(),
+        "maint-*".to_string(),
+        "release-*".to_string(),
+        "hotfix-*".to_string(),
+        "renovate/*".to_string(),
+        "dependabot/*".to_string(),
+    ]
+}
+
+impl Default for DiscoverySection {
+    fn default() -> Self {
+        Self {
+            exclude_patterns: default_exclude_patterns(),
+            exclude_env_branches: true,
+        }
+    }
+}
+
+impl DiscoverySection {
+    pub fn should_exclude(&self, branch: &str, env_branches: &[&str]) -> bool {
+        if self.exclude_env_branches && env_branches.iter().any(|e| *e == branch) {
+            return true;
+        }
+        for pattern in &self.exclude_patterns {
+            if Self::matches_pattern(branch, pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn matches_pattern(branch: &str, pattern: &str) -> bool {
+        if pattern.ends_with('*') {
+            let prefix = &pattern[..pattern.len() - 1];
+            branch.starts_with(prefix)
+        } else if pattern.starts_with('*') {
+            let suffix = &pattern[1..];
+            branch.ends_with(suffix)
+        } else {
+            branch == pattern
+        }
+    }
+}
+
 impl Default for WorkspaceConfig {
     fn default() -> Self {
         let mut environments = HashMap::new();
@@ -177,6 +239,7 @@ impl Default for WorkspaceConfig {
             rebuild: RebuildSection::default(),
             release: ReleaseSection::default(),
             provider: ProviderSection::default(),
+            discovery: DiscoverySection::default(),
         }
     }
 }
@@ -188,8 +251,7 @@ pub fn load_config(path: &Path) -> Result<WorkspaceConfig> {
 }
 
 pub fn save_config(path: &Path, config: &WorkspaceConfig) -> Result<()> {
-    let content =
-        toml::to_string_pretty(config).map_err(std::io::Error::other)?;
+    let content = toml::to_string_pretty(config).map_err(std::io::Error::other)?;
     std::fs::write(path, content)?;
     Ok(())
 }

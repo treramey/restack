@@ -24,11 +24,7 @@ pub fn add_topic_to_env(
     })
 }
 
-pub fn remove_topic_from_env(
-    conn: &Connection,
-    topic_id: &TopicId,
-    env_id: &EnvId,
-) -> Result<()> {
+pub fn remove_topic_from_env(conn: &Connection, topic_id: &TopicId, env_id: &EnvId) -> Result<()> {
     conn.execute(
         "DELETE FROM topic_environments WHERE topic_id = ?1 AND env_id = ?2",
         rusqlite::params![topic_id, env_id],
@@ -74,9 +70,7 @@ pub fn get_topics_in_env(conn: &Connection, env_id: &EnvId) -> Result<Vec<Topic>
 }
 
 pub fn get_envs_for_topic(conn: &Connection, topic_id: &TopicId) -> Result<Vec<EnvId>> {
-    let mut stmt = conn.prepare(
-        "SELECT env_id FROM topic_environments WHERE topic_id = ?1",
-    )?;
+    let mut stmt = conn.prepare("SELECT env_id FROM topic_environments WHERE topic_id = ?1")?;
 
     let rows = stmt.query_map([topic_id], |row| row.get::<_, EnvId>(0))?;
 
@@ -85,6 +79,40 @@ pub fn get_envs_for_topic(conn: &Connection, topic_id: &TopicId) -> Result<Vec<E
         env_ids.push(row?);
     }
     Ok(env_ids)
+}
+
+pub fn list_all_topic_environments(conn: &Connection) -> Result<Vec<TopicEnvironment>> {
+    let mut stmt = conn
+        .prepare("SELECT topic_id, env_id, added_at FROM topic_environments ORDER BY added_at")?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(TopicEnvironmentRow {
+            topic_id: row.get(0)?,
+            env_id: row.get(1)?,
+            added_at: row.get(2)?,
+        })
+    })?;
+
+    let mut topic_envs = Vec::new();
+    for row in rows {
+        let r = row?;
+        let added_at = chrono::DateTime::parse_from_rfc3339(&r.added_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        topic_envs.push(TopicEnvironment {
+            topic_id: r.topic_id,
+            env_id: r.env_id,
+            added_at,
+        });
+    }
+    Ok(topic_envs)
+}
+
+struct TopicEnvironmentRow {
+    topic_id: TopicId,
+    env_id: EnvId,
+    added_at: String,
 }
 
 struct TopicRow {

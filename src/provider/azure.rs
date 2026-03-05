@@ -23,9 +23,8 @@ pub struct AzureDevOpsAdapter {
 
 impl AzureDevOpsAdapter {
     pub fn new(remote_url: Option<&str>) -> Self {
-        let (organization, project, repository) = remote_url
-            .and_then(parse_azure_slug)
-            .unwrap_or_default();
+        let (organization, project, repository) =
+            remote_url.and_then(parse_azure_slug).unwrap_or_default();
         Self {
             organization,
             project,
@@ -130,14 +129,23 @@ impl ProviderAdapter for AzureDevOpsAdapter {
     fn create_pr(&self, params: &CreatePrParams) -> Result<PullRequest> {
         let org_url = self.org_url();
         let mut args = vec![
-            "repos", "pr", "create",
-            "--repository", &self.repository,
-            "--project", &self.project,
-            "--org", &org_url,
-            "--source-branch", &params.head,
-            "--target-branch", &params.base,
-            "--title", &params.title,
-            "--output", "json",
+            "repos",
+            "pr",
+            "create",
+            "--repository",
+            &self.repository,
+            "--project",
+            &self.project,
+            "--org",
+            &org_url,
+            "--source-branch",
+            &params.head,
+            "--target-branch",
+            &params.base,
+            "--title",
+            &params.title,
+            "--output",
+            "json",
         ];
         let body_str;
         if let Some(body) = &params.body {
@@ -161,54 +169,84 @@ impl ProviderAdapter for AzureDevOpsAdapter {
             MergeStrategy::Rebase => "rebase",
         };
         let json = run_az(&[
-            "repos", "pr", "update",
-            "--id", &params.pr_number,
-            "--org", &org_url,
-            "--status", "completed",
-            "--merge-strategy", az_strategy,
-            "--output", "json",
+            "repos",
+            "pr",
+            "update",
+            "--id",
+            &params.pr_number,
+            "--org",
+            &org_url,
+            "--status",
+            "completed",
+            "--merge-strategy",
+            az_strategy,
+            "--output",
+            "json",
         ])?;
         let row: AzPrRow = serde_json::from_str(&json)?;
         let merged = row.status.to_lowercase() == "completed";
         if params.delete_branch {
-            let ref_name = format!("refs/heads/{}", row.source_ref_name
-                .strip_prefix("refs/heads/")
-                .unwrap_or(&row.source_ref_name));
+            let ref_name = format!(
+                "refs/heads/{}",
+                row.source_ref_name
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(&row.source_ref_name)
+            );
             // Best-effort branch delete
             let _ = run_az(&[
-                "repos", "ref", "delete",
-                "--name", &ref_name,
-                "--repository", &self.repository,
-                "--project", &self.project,
-                "--org", &org_url,
-                "--object-id", "0000000000000000000000000000000000000000",
+                "repos",
+                "ref",
+                "delete",
+                "--name",
+                &ref_name,
+                "--repository",
+                &self.repository,
+                "--project",
+                &self.project,
+                "--org",
+                &org_url,
+                "--object-id",
+                "0000000000000000000000000000000000000000",
             ]);
         }
         Ok(MergePrResult {
             merged,
             sha: None,
-            message: format!("PR {} {}", params.pr_number, if merged { "completed" } else { "update requested" }),
+            message: format!(
+                "PR {} {}",
+                params.pr_number,
+                if merged {
+                    "completed"
+                } else {
+                    "update requested"
+                }
+            ),
         })
     }
 
-    fn set_branch_protection(&self, params: &BranchProtectionParams) -> Result<BranchProtectionResult> {
+    fn set_branch_protection(
+        &self,
+        params: &BranchProtectionParams,
+    ) -> Result<BranchProtectionResult> {
         let org_url = self.org_url();
         // Get repository ID first
         let repo_json = run_az(&[
-            "repos", "show",
-            "--repository", &self.repository,
-            "--project", &self.project,
-            "--org", &org_url,
-            "--output", "json",
+            "repos",
+            "show",
+            "--repository",
+            &self.repository,
+            "--project",
+            &self.project,
+            "--org",
+            &org_url,
+            "--output",
+            "json",
         ])?;
         let repo_info: AzRepoInfo = serde_json::from_str(&repo_json)?;
 
         // Create minimum reviewers policy
         if params.require_pr {
-            let policy_uri = format!(
-                "{}/_apis/policy/configurations?api-version=7.0",
-                org_url
-            );
+            let policy_uri = format!("{}/_apis/policy/configurations?api-version=7.0", org_url);
             let payload = serde_json::json!({
                 "isEnabled": true,
                 "isBlocking": true,
@@ -224,18 +262,19 @@ impl ProviderAdapter for AzureDevOpsAdapter {
                 },
             });
             run_az(&[
-                "rest", "--method", "post",
-                "--uri", &policy_uri,
-                "--body", &payload.to_string(),
+                "rest",
+                "--method",
+                "post",
+                "--uri",
+                &policy_uri,
+                "--body",
+                &payload.to_string(),
             ])?;
         }
 
         // Create build policy for each required check
         for check in &params.required_checks {
-            let policy_uri = format!(
-                "{}/_apis/policy/configurations?api-version=7.0",
-                org_url
-            );
+            let policy_uri = format!("{}/_apis/policy/configurations?api-version=7.0", org_url);
             let payload = serde_json::json!({
                 "isEnabled": true,
                 "isBlocking": true,
@@ -251,9 +290,13 @@ impl ProviderAdapter for AzureDevOpsAdapter {
                 },
             });
             run_az(&[
-                "rest", "--method", "post",
-                "--uri", &policy_uri,
-                "--body", &payload.to_string(),
+                "rest",
+                "--method",
+                "post",
+                "--uri",
+                &policy_uri,
+                "--body",
+                &payload.to_string(),
             ])?;
         }
 
@@ -266,17 +309,20 @@ impl ProviderAdapter for AzureDevOpsAdapter {
 
     fn trigger_pipeline(&self, params: &TriggerPipelineParams) -> Result<PipelineRunResult> {
         let org_url = self.org_url();
-        let pipeline = params
-            .pipeline_name
-            .as_deref()
-            .unwrap_or(&self.repository);
+        let pipeline = params.pipeline_name.as_deref().unwrap_or(&self.repository);
         let json = run_az(&[
-            "pipelines", "run",
-            "--name", pipeline,
-            "--branch", &params.branch,
-            "--project", &self.project,
-            "--org", &org_url,
-            "--output", "json",
+            "pipelines",
+            "run",
+            "--name",
+            pipeline,
+            "--branch",
+            &params.branch,
+            "--project",
+            &self.project,
+            "--org",
+            &org_url,
+            "--output",
+            "json",
         ])?;
         let run: AzPipelineRunResponse = serde_json::from_str(&json)?;
         Ok(PipelineRunResult {
@@ -419,11 +465,7 @@ fn parse_azure_slug(url: &str) -> Option<(String, String, String)> {
         let parts: Vec<&str> = rest.splitn(3, '/').collect();
         if parts.len() == 3 {
             let repo = parts[2].strip_suffix(".git").unwrap_or(parts[2]);
-            return Some((
-                parts[0].to_string(),
-                parts[1].to_string(),
-                repo.to_string(),
-            ));
+            return Some((parts[0].to_string(), parts[1].to_string(), repo.to_string()));
         }
         return None;
     }
@@ -437,11 +479,7 @@ fn parse_azure_slug(url: &str) -> Option<(String, String, String)> {
         // parts: [org, project, "_git", repo]
         if parts.len() == 4 && parts[2] == "_git" {
             let repo = parts[3].strip_suffix(".git").unwrap_or(parts[3]);
-            return Some((
-                parts[0].to_string(),
-                parts[1].to_string(),
-                repo.to_string(),
-            ));
+            return Some((parts[0].to_string(), parts[1].to_string(), repo.to_string()));
         }
         return None;
     }
@@ -509,8 +547,7 @@ mod tests {
 
     #[test]
     fn test_parse_azure_slug_visualstudio() {
-        let result =
-            parse_azure_slug("https://myorg.visualstudio.com/myproject/_git/myrepo");
+        let result = parse_azure_slug("https://myorg.visualstudio.com/myproject/_git/myrepo");
         assert_eq!(
             result,
             Some((
@@ -576,8 +613,14 @@ mod tests {
         let runs: Vec<AzPipelineRun> = serde_json::from_str(json).unwrap();
         let checks: Vec<CheckRun> = runs.into_iter().map(CheckRun::from).collect();
         assert_eq!(checks.len(), 2);
-        assert!(matches!(checks[0].conclusion, Some(CheckConclusion::Success)));
-        assert!(matches!(checks[1].conclusion, Some(CheckConclusion::Failure)));
+        assert!(matches!(
+            checks[0].conclusion,
+            Some(CheckConclusion::Success)
+        ));
+        assert!(matches!(
+            checks[1].conclusion,
+            Some(CheckConclusion::Failure)
+        ));
         assert_eq!(derive_overall_status(&checks), CiStatus::Failed);
     }
 

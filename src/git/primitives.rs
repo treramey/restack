@@ -103,6 +103,57 @@ pub fn branch_exists(repo: &Path, name: &str) -> GitResult<bool> {
     Ok(output.status.success())
 }
 
+/// Check if a branch exists on the remote (origin/<name>).
+pub fn remote_branch_exists(repo: &Path, name: &str) -> GitResult<bool> {
+    let ref_name = format!("refs/remotes/origin/{name}");
+    let output = run_git_raw(repo, &["rev-parse", "--verify", &ref_name])?;
+    Ok(output.status.success())
+}
+
+/// List all local branch names.
+pub fn list_local_branches(repo: &Path) -> GitResult<Vec<String>> {
+    let output = run_git(repo, &["branch", "--format=%(refname:short)"])?;
+    if output.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(output.lines().map(|l| l.trim().to_string()).collect())
+}
+
+/// List all remote branch names (without the origin/ prefix).
+/// Filters out HEAD and other symbolic refs.
+pub fn list_remote_branches(repo: &Path) -> GitResult<Vec<String>> {
+    let output = run_git(repo, &["branch", "-r", "--format=%(refname:short)"])?;
+    if output.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(output
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| l.starts_with("origin/"))
+        .filter(|l| !l.contains("HEAD")) // Skip origin/HEAD
+        .filter_map(|l| l.strip_prefix("origin/"))
+        .map(|l| l.to_string())
+        .collect())
+}
+
+/// List all branches (local + remote), with a flag indicating if local.
+/// Returns (branch_name, is_local) tuples. Deduplicates by preferring local.
+pub fn list_all_branches(repo: &Path) -> GitResult<Vec<(String, bool)>> {
+    let local = list_local_branches(repo)?;
+    let remote = list_remote_branches(repo)?;
+
+    let local_set: std::collections::HashSet<_> = local.iter().cloned().collect();
+    let mut result: Vec<(String, bool)> = local.into_iter().map(|b| (b, true)).collect();
+
+    for branch in remote {
+        if !local_set.contains(&branch) {
+            result.push((branch, false));
+        }
+    }
+
+    Ok(result)
+}
+
 // ---------------------------------------------------------------------------
 // Merge operations
 // ---------------------------------------------------------------------------
@@ -157,6 +208,11 @@ pub fn push(repo: &Path, branch: &str) -> GitResult<()> {
 pub fn fetch(repo: &Path) -> GitResult<()> {
     run_git(repo, &["fetch", "origin"])?;
     Ok(())
+}
+
+/// Check if origin remote exists.
+pub fn has_remote(repo: &Path) -> bool {
+    run_git(repo, &["remote", "get-url", "origin"]).is_ok()
 }
 
 // ---------------------------------------------------------------------------

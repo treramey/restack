@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::db::{topic_repo, repo_repo};
+use crate::db::{repo_repo, topic_repo};
 use crate::error::Result;
 use crate::id::TopicId;
 use crate::provider::{self, PrState};
@@ -161,8 +161,8 @@ pub fn notify_conflicts(conn: &Connection, repo: &Repo, conflicts: &[Conflict]) 
 
 /// Helper to load a repo by ID string (used by CLI commands).
 pub fn load_repo(conn: &Connection, repo_id_str: &str) -> Result<Repo> {
-    let repo_id = repo_id_str.parse().map_err(|_| {
-        crate::error::RestackError::RepoNotFound(crate::id::RepoId::new())
-    })?;
+    let repo_id = repo_id_str
+        .parse()
+        .map_err(|_| crate::error::RestackError::RepoNotFound(crate::id::RepoId::new()))?;
     repo_repo::get_repo(conn, &repo_id)
 }

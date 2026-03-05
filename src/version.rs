@@ -90,7 +90,9 @@ impl FromStr for BumpType {
             "major" => Ok(Self::Major),
             "minor" => Ok(Self::Minor),
             "patch" => Ok(Self::Patch),
-            _ => Err(format!("invalid bump type: {s} (expected major, minor, or patch)")),
+            _ => Err(format!(
+                "invalid bump type: {s} (expected major, minor, or patch)"
+            )),
         }
     }
 }
@@ -102,13 +104,27 @@ mod tests {
     #[test]
     fn parse_plain() {
         let v = SemVer::parse("1.2.3").unwrap();
-        assert_eq!(v, SemVer { major: 1, minor: 2, patch: 3 });
+        assert_eq!(
+            v,
+            SemVer {
+                major: 1,
+                minor: 2,
+                patch: 3
+            }
+        );
     }
 
     #[test]
     fn parse_with_v_prefix() {
         let v = SemVer::parse("v0.10.5").unwrap();
-        assert_eq!(v, SemVer { major: 0, minor: 10, patch: 5 });
+        assert_eq!(
+            v,
+            SemVer {
+                major: 0,
+                minor: 10,
+                patch: 5
+            }
+        );
     }
 
     #[test]
@@ -120,31 +136,72 @@ mod tests {
 
     #[test]
     fn bump_major() {
-        let v = SemVer { major: 1, minor: 2, patch: 3 };
-        assert_eq!(v.bump(BumpType::Major), SemVer { major: 2, minor: 0, patch: 0 });
+        let v = SemVer {
+            major: 1,
+            minor: 2,
+            patch: 3,
+        };
+        assert_eq!(
+            v.bump(BumpType::Major),
+            SemVer {
+                major: 2,
+                minor: 0,
+                patch: 0
+            }
+        );
     }
 
     #[test]
     fn bump_minor() {
-        let v = SemVer { major: 1, minor: 2, patch: 3 };
-        assert_eq!(v.bump(BumpType::Minor), SemVer { major: 1, minor: 3, patch: 0 });
+        let v = SemVer {
+            major: 1,
+            minor: 2,
+            patch: 3,
+        };
+        assert_eq!(
+            v.bump(BumpType::Minor),
+            SemVer {
+                major: 1,
+                minor: 3,
+                patch: 0
+            }
+        );
     }
 
     #[test]
     fn bump_patch() {
-        let v = SemVer { major: 1, minor: 2, patch: 3 };
-        assert_eq!(v.bump(BumpType::Patch), SemVer { major: 1, minor: 2, patch: 4 });
+        let v = SemVer {
+            major: 1,
+            minor: 2,
+            patch: 3,
+        };
+        assert_eq!(
+            v.bump(BumpType::Patch),
+            SemVer {
+                major: 1,
+                minor: 2,
+                patch: 4
+            }
+        );
     }
 
     #[test]
     fn to_tag() {
-        let v = SemVer { major: 1, minor: 0, patch: 0 };
+        let v = SemVer {
+            major: 1,
+            minor: 0,
+            patch: 0,
+        };
         assert_eq!(v.to_tag(), "v1.0.0");
     }
 
     #[test]
     fn display() {
-        let v = SemVer { major: 3, minor: 14, patch: 159 };
+        let v = SemVer {
+            major: 3,
+            minor: 14,
+            patch: 159,
+        };
         assert_eq!(format!("{v}"), "3.14.159");
     }
 
@@ -158,7 +215,11 @@ mod tests {
 
     #[test]
     fn serde_roundtrip() {
-        let v = SemVer { major: 1, minor: 2, patch: 3 };
+        let v = SemVer {
+            major: 1,
+            minor: 2,
+            patch: 3,
+        };
         let json = serde_json::to_string(&v).unwrap();
         let parsed: SemVer = serde_json::from_str(&json).unwrap();
         assert_eq!(v, parsed);

@@ -27,13 +27,13 @@ import {
   useRebuildStatus,
   useConflicts,
 } from "../../lib/queries.js";
-import { usePromote, useDemote, useRebuild, useTopicSync } from "../../lib/mutations.js";
+import { usePromote, useDemote, useRebuild } from "../../lib/mutations.js";
 import { useUIStore } from "../../lib/store.js";
 
 // ============ Helpers ============
 
 const STATUS_BORDER: Record<TopicStatus, string> = {
-  active: "border-status-active/40",
+  active: "border-border",
   conflict: "border-status-conflict",
   graduated: "border-status-graduated/40",
   closed: "border-status-closed/40",
@@ -86,6 +86,19 @@ function conflictsForTopic(
   return conflicts.filter((c) => c.topicId === topicId && !c.resolved);
 }
 
+function unassignedTopics(
+  topics: Topic[],
+  topicEnvs: TopicEnvironment[],
+): Topic[] {
+  const assignedIds = new Set(topicEnvs.map((te) => te.topicId));
+  return topics.filter(
+    (t) =>
+      !assignedIds.has(t.id) &&
+      t.status !== "closed" &&
+      t.status !== "graduated",
+  );
+}
+
 // ============ Main Component ============
 
 export function KanbanView() {
@@ -102,7 +115,6 @@ export function KanbanView() {
   const promote = usePromote();
   const demote = useDemote();
   const rebuild = useRebuild();
-  const syncTopics = useTopicSync();
 
   // Filter by selected repo
   const environments = useMemo(() => {
@@ -134,17 +146,37 @@ export function KanbanView() {
   // Keyboard focus: [laneIndex, cardIndex]
   const [focusedLane, setFocusedLane] = useState(0);
   const [focusedCard, setFocusedCard] = useState(0);
-  const cardRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Build lane data
   const lanes = useMemo(() => {
     if (!topicEnvs) return [];
-    return environments.map((env) => ({
+    const envLanes = environments.map((env) => ({
       env,
       topics: topicsInEnv(env.id, topicEnvs, topics),
       lastRebuild: rebuilds ? latestRebuild(env.id, rebuilds) : undefined,
     }));
-  }, [environments, topics, topicEnvs, rebuilds]);
+
+    const unassigned = unassignedTopics(topics, topicEnvs);
+    if (unassigned.length > 0) {
+      return [
+        {
+          env: {
+            id: "unassigned" as EnvId,
+            repoId: (selectedRepoId ?? "") as any,
+            name: "Unassigned",
+            branch: "",
+            ordinal: -1,
+            autoPromote: false,
+          },
+          topics: unassigned,
+          lastRebuild: undefined,
+        },
+        ...envLanes,
+      ];
+    }
+    return envLanes;
+  }, [environments, topics, topicEnvs, rebuilds, selectedRepoId]);
 
   // Clamp focus when lane contents change
   useEffect(() => {
@@ -228,7 +260,7 @@ export function KanbanView() {
   }, [lanes, focusedLane, focusedCard, setSelectedTopicId]);
 
   const handleCardRef = useCallback(
-    (id: TopicId, el: HTMLButtonElement | null) => {
+    (id: TopicId, el: HTMLDivElement | null) => {
       if (el) {
         cardRefs.current.set(id, el);
       } else {
@@ -260,27 +292,10 @@ export function KanbanView() {
     );
   }
 
-  const isMutating =
-    promote.isPending || demote.isPending || rebuild.isPending || syncTopics.isPending;
+  const isMutating = promote.isPending || demote.isPending || rebuild.isPending;
 
   return (
     <div className="flex-1 flex flex-col bg-bg-primary overflow-hidden">
-      {/* Toolbar */}
-      {selectedRepoId && (
-        <div className="flex items-center gap-2 px-4 pt-3 pb-1">
-          <button
-            type="button"
-            disabled={isMutating}
-            onClick={() => syncTopics.mutate({ repo: selectedRepoId })}
-            className="text-[11px] font-mono px-2 py-1 rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-            title="Sync PRs from provider"
-          >
-            {syncTopics.isPending ? "Syncing..." : "Sync PRs"}
-          </button>
-        </div>
-      )}
-
-      {/* Lane container */}
       <div className="flex-1 flex gap-3 p-4 overflow-x-auto min-h-0">
         {lanes.map((lane, laneIndex) => (
           <LaneColumn
@@ -336,7 +351,7 @@ interface LaneColumnProps {
   selectedTopicId: TopicId | null;
   nextEnv: Environment | undefined;
   isMutating: boolean;
-  onCardRef: (id: TopicId, el: HTMLButtonElement | null) => void;
+  onCardRef: (id: TopicId, el: HTMLDivElement | null) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
   onPromote: (topicId: TopicId) => void;
   onDemote: (topicId: TopicId) => void;
@@ -359,16 +374,17 @@ function LaneColumn({
   onDemote,
   onRebuild,
 }: LaneColumnProps) {
+  const isUnassigned = env.id === "unassigned";
+
   return (
     <div className="flex-1 min-w-[280px] max-w-[400px] flex flex-col min-h-0">
-      {/* Lane header */}
       <div
         className={`
-          px-3 py-2 mb-2 rounded border
+          px-3 py-2 mb-2 rounded border flex-shrink-0
           ${isCurrentLane ? "border-accent bg-accent-subtle/30" : "border-border bg-surface-primary"}
         `}
       >
-        <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center justify-between">
           <span
             className={`
               text-xs font-mono uppercase tracking-wider font-bold
@@ -386,25 +402,30 @@ function LaneColumn({
             >
               {topics.length}
             </span>
-            <button
-              type="button"
-              disabled={isMutating}
-              onClick={onRebuild}
-              className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              title={`Rebuild ${env.name}`}
-            >
-              Rebuild
-            </button>
+            {!isUnassigned && (
+              <button
+                type="button"
+                disabled={isMutating}
+                onClick={onRebuild}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                title={`Rebuild ${env.name}`}
+              >
+                Rebuild
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Branch + rebuild status */}
-        <div className="flex items-center gap-2 text-[10px] font-mono text-text-dim">
-          <span>{env.branch}</span>
-          {lastRebuild && (
-            <span className={REBUILD_COLORS[lastRebuild.status]}>
-              {lastRebuild.status}
-            </span>
+        <div className="flex items-center gap-2 text-[10px] font-mono text-text-dim h-4 mt-1">
+          {!isUnassigned && (
+            <>
+              <span>{env.branch}</span>
+              {lastRebuild && (
+                <span className={REBUILD_COLORS[lastRebuild.status]}>
+                  {lastRebuild.status}
+                </span>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -413,7 +434,7 @@ function LaneColumn({
       <div className="flex-1 relative min-h-0">
         <div className="absolute inset-0 overflow-y-auto">
           <div
-            className="space-y-2 p-2 pr-3"
+            className="space-y-2 px-3 pb-3"
             role="list"
             aria-label={`${env.name} topics`}
           >
@@ -458,7 +479,7 @@ interface TopicCardProps {
   isSelected: boolean;
   nextEnv: Environment | undefined;
   isMutating: boolean;
-  onRef: (id: TopicId, el: HTMLButtonElement | null) => void;
+  onRef: (id: TopicId, el: HTMLDivElement | null) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
   onPromote: (topicId: TopicId) => void;
   onDemote: (topicId: TopicId) => void;
@@ -478,7 +499,7 @@ function TopicCard({
   onDemote,
 }: TopicCardProps) {
   const handleRef = useCallback(
-    (el: HTMLButtonElement | null) => {
+    (el: HTMLDivElement | null) => {
       onRef(topic.id, el);
     },
     [topic.id, onRef],
@@ -489,39 +510,45 @@ function TopicCard({
 
   return (
     <div role="listitem">
-      <button
+      <div
         ref={handleRef}
-        type="button"
+        role="button"
         tabIndex={isFocused ? 0 : -1}
+        aria-label={topic.branch}
         aria-current={isSelected ? "true" : undefined}
         onClick={() => onSelect(topic, cardIndex)}
-        className="w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary rounded cursor-pointer"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSelect(topic, cardIndex);
+          }
+        }}
+        className={`
+          p-3 rounded border transition-colors cursor-pointer
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary
+          ${isSelected ? "border-accent bg-accent-subtle/30" : `border-border ${STATUS_BORDER[topic.status]} bg-surface-primary hover:bg-surface-secondary`}
+          ${isConflict ? "border-status-conflict" : ""}
+          ${isGraduated ? "opacity-60" : ""}
+        `}
       >
         <div
           className={`
-            p-3 rounded border transition-colors
-            ${isSelected ? "border-accent bg-accent-subtle/30" : `border-border ${STATUS_BORDER[topic.status]} bg-surface-primary hover:bg-surface-secondary`}
-            ${isConflict ? "border-status-conflict" : ""}
-            ${isGraduated ? "opacity-60" : ""}
+            text-sm font-mono leading-tight mb-2 truncate
+            ${isGraduated ? "text-text-muted" : "text-text-primary"}
           `}
         >
-          {/* Branch name */}
-          <div
-            className={`
-              text-sm font-mono leading-tight mb-2 truncate
-              ${isGraduated ? "text-text-muted" : "text-text-primary"}
-            `}
-          >
-            {topic.branch}
-          </div>
+          {topic.branch}
+        </div>
 
           {/* Status badges row */}
           <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-            <span
-              className={`px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${STATUS_BADGE_COLORS[topic.status]}`}
-            >
-              {topic.status}
-            </span>
+            {topic.status !== "active" && (
+              <span
+                className={`px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${STATUS_BADGE_COLORS[topic.status]}`}
+              >
+                {topic.status}
+              </span>
+            )}
             {topic.ciStatus &&
               (topic.ciUrl ? (
                 <a
@@ -581,16 +608,17 @@ function TopicCard({
                 onClick={() => onPromote(topic.id)}
               />
             )}
-            <ActionButton
-              label="Remove"
-              title={`Remove from this environment`}
-              disabled={isMutating}
-              onClick={() => onDemote(topic.id)}
-              variant="danger"
-            />
+            {!isGraduated && (
+              <ActionButton
+                label="Archive"
+                title="Hide from board"
+                disabled={isMutating}
+                onClick={() => onDemote(topic.id)}
+                variant="danger"
+              />
+            )}
           </div>
         </div>
-      </button>
     </div>
   );
 }

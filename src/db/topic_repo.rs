@@ -136,6 +136,15 @@ pub fn update_topic_status(conn: &Connection, id: &TopicId, status: TopicStatus)
     Ok(())
 }
 
+pub fn update_topic_status_return(
+    conn: &Connection,
+    id: &TopicId,
+    status: TopicStatus,
+) -> Result<Topic> {
+    update_topic_status(conn, id, status)?;
+    get_topic(conn, id)
+}
+
 fn map_topic_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TopicRow> {
     Ok(TopicRow {
         id: row.get(0)?,

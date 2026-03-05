@@ -22,10 +22,7 @@ pub fn set_branch_protection(
     adapter.set_branch_protection(&params)
 }
 
-pub fn protect_env_branches(
-    conn: &Connection,
-    repo: &Repo,
-) -> Result<Vec<BranchProtectionResult>> {
+pub fn protect_env_branches(conn: &Connection, repo: &Repo) -> Result<Vec<BranchProtectionResult>> {
     let envs = env_repo::list_envs(conn, Some(&repo.id))?;
     let adapter = provider::create_adapter(repo.provider, repo.remote_url.as_deref());
     let mut results = Vec::new();

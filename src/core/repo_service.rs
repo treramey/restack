@@ -39,8 +39,7 @@ pub fn add_repo(
     }
 
     // Detect provider from remote
-    let provider = git::detect_provider(path)
-        .unwrap_or(Provider::Unknown);
+    let provider = git::detect_provider(path).unwrap_or(Provider::Unknown);
 
     // Use directory name as default name
     let repo_name = name.map(|n| n.to_string()).unwrap_or_else(|| {
@@ -62,7 +61,14 @@ pub fn add_repo(
     }
 
     let base_branch = git::detect_default_branch(path);
-    let repo = repo_repo::create_repo(conn, &repo_name, &canonical_path, None, provider, &base_branch)?;
+    let repo = repo_repo::create_repo(
+        conn,
+        &repo_name,
+        &canonical_path,
+        None,
+        provider,
+        &base_branch,
+    )?;
 
     // Create default environments
     env_repo::create_env(conn, &repo.id, "staging", "staging", 0, false)?;

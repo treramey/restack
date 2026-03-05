@@ -71,12 +71,12 @@ macro_rules! define_id {
             type Err = IdParseError;
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
-                let ulid = s
-                    .strip_prefix(Self::PREFIX)
-                    .ok_or_else(|| IdParseError::MissingPrefix {
-                        expected: Self::PREFIX,
-                        actual: s.to_string(),
-                    })?;
+                let ulid =
+                    s.strip_prefix(Self::PREFIX)
+                        .ok_or_else(|| IdParseError::MissingPrefix {
+                            expected: Self::PREFIX,
+                            actual: s.to_string(),
+                        })?;
                 validate_ulid(ulid)?;
                 Ok(Self::from_raw_ulid(ulid.to_string()))
             }

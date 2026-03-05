@@ -6,13 +6,16 @@
  */
 
 import { useUIStore, type ViewMode } from "./lib/store.js";
+import { useWebSocketSync } from "./lib/websocket.js";
 import { Header } from "./components/Header.js";
 import { DetailPanel } from "./components/DetailPanel.js";
 import { KanbanView } from "./components/views/KanbanView.js";
 import { CanvasView, ListView } from "./components/views/index.js";
+import { Toaster } from "sonner";
 
 export function App() {
   const viewMode = useUIStore((s) => s.viewMode);
+  useWebSocketSync();
 
   return (
     <div className="flex flex-col h-screen bg-bg-primary text-text-primary">
@@ -24,6 +27,8 @@ export function App() {
         </div>
         <DetailPanel />
       </main>
+
+      <Toaster position="bottom-right" theme="dark" />
     </div>
   );
 }

@@ -41,11 +41,7 @@ pub fn handle(conn: &Connection, cmd: &CiCommand, _cwd: &Path) -> Result<String>
             output,
         } => {
             let repo = provider_service::load_repo(conn, repo)?;
-            let files = ci_service::generate_workflow(
-                repo.provider,
-                output.as_deref(),
-                *stdout,
-            )?;
+            let files = ci_service::generate_workflow(repo.provider, output.as_deref(), *stdout)?;
             Ok(serde_json::to_string_pretty(&files)?)
         }
     }

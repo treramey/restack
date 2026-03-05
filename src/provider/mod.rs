@@ -28,7 +28,10 @@ pub trait ProviderAdapter: Send + Sync {
         Err(RestackError::ProviderNotConfigured)
     }
 
-    fn set_branch_protection(&self, _params: &BranchProtectionParams) -> Result<BranchProtectionResult> {
+    fn set_branch_protection(
+        &self,
+        _params: &BranchProtectionParams,
+    ) -> Result<BranchProtectionResult> {
         Err(RestackError::ProviderNotConfigured)
     }
 

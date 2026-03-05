@@ -34,8 +34,7 @@ pub fn prepare(
     };
 
     // Get commits since last tag with sha|||subject format
-    let commits =
-        git::log_since(repo_path, latest_tag.as_deref(), "%H|||%s")?;
+    let commits = git::log_since(repo_path, latest_tag.as_deref(), "%H|||%s")?;
     let conventional = git::parse_conventional_commits(&commits);
 
     let auto_bump = determine_bump_type(&conventional);
@@ -43,14 +42,10 @@ pub fn prepare(
     let new_version = current_version.bump(bump_type);
 
     // Get merge commit subjects for topic extraction
-    let merge_subjects: Vec<String> = git::log_since(
-        repo_path,
-        latest_tag.as_deref(),
-        "%s",
-    )?
-    .into_iter()
-    .filter(|s| s.starts_with("Merge branch '"))
-    .collect();
+    let merge_subjects: Vec<String> = git::log_since(repo_path, latest_tag.as_deref(), "%s")?
+        .into_iter()
+        .filter(|s| s.starts_with("Merge branch '"))
+        .collect();
     let merged_topics = git::extract_topics_from_merges(&merge_subjects);
 
     let changelog = build_changelog(&conventional, &merged_topics);
@@ -60,11 +55,7 @@ pub fn prepare(
         tag: new_version.to_tag(),
         bump_type,
         changelog,
-        previous_version: latest_tag.map(|t| {
-            t.strip_prefix('v')
-                .unwrap_or(&t)
-                .to_string()
-        }),
+        previous_version: latest_tag.map(|t| t.strip_prefix('v').unwrap_or(&t).to_string()),
     })
 }
 
@@ -117,8 +108,7 @@ pub fn cut(
 ///
 /// Returns `true` if a merge was performed, `false` if maint had nothing to merge.
 pub fn merge_maint_to_master(repo_path: &Path) -> Result<bool> {
-    let has_commits =
-        git::has_commits_between(repo_path, "origin/master", "origin/maint")?;
+    let has_commits = git::has_commits_between(repo_path, "origin/master", "origin/maint")?;
 
     if !has_commits {
         return Ok(false);

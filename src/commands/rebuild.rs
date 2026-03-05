@@ -12,6 +12,8 @@ use crate::types::Rebuild;
 
 #[derive(Subcommand)]
 pub enum RebuildCommand {
+    /// List all rebuilds
+    List,
     /// Rebuild a specific environment
     Env {
         /// Environment ID
@@ -55,6 +57,10 @@ struct MultiRepoRebuildResult {
 
 pub fn handle(conn: &Connection, cmd: &RebuildCommand, repo_path: &Path) -> Result<String> {
     match cmd {
+        RebuildCommand::List => {
+            let rebuilds = crate::db::rebuild_repo::list_rebuilds(conn)?;
+            Ok(serde_json::to_string_pretty(&rebuilds)?)
+        }
         RebuildCommand::Env {
             env,
             dry_run,

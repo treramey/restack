@@ -31,6 +31,12 @@ ui-test-*.png
 .opencode/
 *.omc
 
+# Restack workspace
+.restack/
+
+# Sisyphus
+.sisyphus/
+
 # Environment
 .env
 .env.*

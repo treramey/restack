@@ -22,11 +22,7 @@ pub enum PipelineCommand {
 
 pub fn handle(conn: &Connection, cmd: &PipelineCommand) -> Result<String> {
     match cmd {
-        PipelineCommand::Trigger {
-            repo,
-            branch,
-            name,
-        } => {
+        PipelineCommand::Trigger { repo, branch, name } => {
             let repo = provider_service::load_repo(conn, repo)?;
             let result = pipeline_service::trigger_pipeline(&repo, branch, name.as_deref())?;
             Ok(serde_json::to_string_pretty(&result)?)

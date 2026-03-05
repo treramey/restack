@@ -4,10 +4,10 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{provider_service, rebuild_service};
-use crate::db::{env_repo, repo_repo, topic_env_repo, topic_repo};
+use crate::db::{conflict_repo, env_repo, repo_repo, topic_env_repo, topic_repo};
 use crate::error::{RestackError, Result};
 use crate::id::RepoId;
-use crate::types::{CiStatus, Environment, Rebuild, Topic, TopicStatus};
+use crate::types::{CiStatus, Conflict, Environment, Rebuild, Topic, TopicStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +15,7 @@ pub struct PromoteResult {
     pub topic: Topic,
     pub env: Environment,
     pub rebuild: Option<Rebuild>,
+    pub conflicts: Vec<Conflict>,
     pub dry_run: bool,
 }
 
@@ -39,10 +40,13 @@ pub fn promote_to(
 
         // Trigger rebuild
         let rebuild = rebuild_service::rebuild_env(conn, &env.id, this_repo_path, false, false)?;
+        let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id).unwrap_or_default();
+
         Ok(PromoteResult {
             topic,
             env,
             rebuild: Some(rebuild),
+            conflicts,
             dry_run,
         })
     } else {
@@ -50,6 +54,7 @@ pub fn promote_to(
             topic,
             env,
             rebuild: None,
+            conflicts: Vec::new(),
             dry_run,
         })
     }
@@ -76,10 +81,13 @@ pub fn demote_from(
 
         // Trigger rebuild
         let rebuild = rebuild_service::rebuild_env(conn, &env.id, this_repo_path, false, false)?;
+        let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id).unwrap_or_default();
+
         Ok(PromoteResult {
             topic,
             env,
             rebuild: Some(rebuild),
+            conflicts,
             dry_run,
         })
     } else {
@@ -87,6 +95,7 @@ pub fn demote_from(
             topic,
             env,
             rebuild: None,
+            conflicts: Vec::new(),
             dry_run,
         })
     }
@@ -178,6 +187,7 @@ pub fn promote_auto(conn: &Connection) -> Result<AutoPromoteResult> {
                     topic: topic.clone(),
                     env: (*env).clone(),
                     rebuild: None,
+                    conflicts: Vec::new(),
                     dry_run: false,
                 });
             }
@@ -186,10 +196,11 @@ pub fn promote_auto(conn: &Connection) -> Result<AutoPromoteResult> {
         // Rebuild each changed env exactly once and backfill the rebuild into promoted entries
         for env_id in &envs_needing_rebuild {
             let rebuild = rebuild_service::rebuild_env(conn, env_id, this_repo_path, false, false)?;
-            // Attach the rebuild result to every PromoteResult for this env
+            let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id).unwrap_or_default();
             for pr in promoted.iter_mut() {
                 if pr.env.id == *env_id {
                     pr.rebuild = Some(rebuild.clone());
+                    pr.conflicts = conflicts.clone();
                 }
             }
         }

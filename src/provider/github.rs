@@ -22,9 +22,7 @@ pub struct GitHubAdapter {
 
 impl GitHubAdapter {
     pub fn new(remote_url: Option<&str>) -> Self {
-        let (owner, repo) = remote_url
-            .and_then(parse_github_slug)
-            .unwrap_or_default();
+        let (owner, repo) = remote_url.and_then(parse_github_slug).unwrap_or_default();
         Self { owner, repo }
     }
 }
@@ -78,13 +76,7 @@ impl ProviderAdapter for GitHubAdapter {
     fn comment_on_pr(&self, pr_number: &str, body: &str) -> Result<()> {
         let repo_flag = format!("{}/{}", self.owner, self.repo);
         run_gh(&[
-            "pr",
-            "comment",
-            pr_number,
-            "--repo",
-            &repo_flag,
-            "--body",
-            body,
+            "pr", "comment", pr_number, "--repo", &repo_flag, "--body", body,
         ])?;
         Ok(())
     }
@@ -92,12 +84,18 @@ impl ProviderAdapter for GitHubAdapter {
     fn create_pr(&self, params: &CreatePrParams) -> Result<PullRequest> {
         let repo_flag = format!("{}/{}", self.owner, self.repo);
         let mut args = vec![
-            "pr", "create",
-            "--head", &params.head,
-            "--base", &params.base,
-            "--title", &params.title,
-            "--repo", &repo_flag,
-            "--json", "number,title,headRefName,baseRefName,state,url",
+            "pr",
+            "create",
+            "--head",
+            &params.head,
+            "--base",
+            &params.base,
+            "--title",
+            &params.title,
+            "--repo",
+            &repo_flag,
+            "--json",
+            "number,title,headRefName,baseRefName,state,url",
         ];
         let body_str;
         if let Some(body) = &params.body {
@@ -120,8 +118,11 @@ impl ProviderAdapter for GitHubAdapter {
             MergeStrategy::Rebase => "--rebase",
         };
         let mut args = vec![
-            "pr", "merge", &params.pr_number,
-            "--repo", &repo_flag,
+            "pr",
+            "merge",
+            &params.pr_number,
+            "--repo",
+            &repo_flag,
             strategy_flag,
         ];
         if params.delete_branch {
@@ -135,7 +136,10 @@ impl ProviderAdapter for GitHubAdapter {
         })
     }
 
-    fn set_branch_protection(&self, params: &BranchProtectionParams) -> Result<BranchProtectionResult> {
+    fn set_branch_protection(
+        &self,
+        params: &BranchProtectionParams,
+    ) -> Result<BranchProtectionResult> {
         let api_path = format!(
             "repos/{}/{}/branches/{}/protection",
             self.owner, self.repo, params.branch
@@ -177,22 +181,28 @@ impl ProviderAdapter for GitHubAdapter {
 
     fn trigger_pipeline(&self, params: &TriggerPipelineParams) -> Result<PipelineRunResult> {
         let repo_flag = format!("{}/{}", self.owner, self.repo);
-        let pipeline = params
-            .pipeline_name
-            .as_deref()
-            .unwrap_or("ci.yml");
+        let pipeline = params.pipeline_name.as_deref().unwrap_or("ci.yml");
         run_gh(&[
-            "workflow", "run", pipeline,
-            "--ref", &params.branch,
-            "--repo", &repo_flag,
+            "workflow",
+            "run",
+            pipeline,
+            "--ref",
+            &params.branch,
+            "--repo",
+            &repo_flag,
         ])?;
         // Fetch the latest run for this branch
         let json = run_gh(&[
-            "run", "list",
-            "--branch", &params.branch,
-            "--limit", "1",
-            "--repo", &repo_flag,
-            "--json", "databaseId,url,status",
+            "run",
+            "list",
+            "--branch",
+            &params.branch,
+            "--limit",
+            "1",
+            "--repo",
+            &repo_flag,
+            "--json",
+            "databaseId,url,status",
         ])?;
         let runs: Vec<GhWorkflowRun> = serde_json::from_str(&json)?;
         match runs.into_iter().next() {
@@ -483,8 +493,14 @@ mod tests {
         let checks: Vec<CheckRun> = resp.check_runs.into_iter().map(CheckRun::from).collect();
         assert_eq!(checks.len(), 2);
         assert_eq!(checks[0].name, "build");
-        assert!(matches!(checks[0].conclusion, Some(CheckConclusion::Success)));
-        assert!(matches!(checks[1].conclusion, Some(CheckConclusion::Failure)));
+        assert!(matches!(
+            checks[0].conclusion,
+            Some(CheckConclusion::Success)
+        ));
+        assert!(matches!(
+            checks[1].conclusion,
+            Some(CheckConclusion::Failure)
+        ));
     }
 
     #[test]
@@ -535,7 +551,11 @@ mod tests {
 
     #[test]
     fn test_merge_strategy_serde_roundtrip() {
-        let strategies = vec![MergeStrategy::Merge, MergeStrategy::Squash, MergeStrategy::Rebase];
+        let strategies = vec![
+            MergeStrategy::Merge,
+            MergeStrategy::Squash,
+            MergeStrategy::Rebase,
+        ];
         for s in strategies {
             let json = serde_json::to_string(&s).unwrap();
             let back: MergeStrategy = serde_json::from_str(&json).unwrap();

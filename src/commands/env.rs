@@ -59,9 +59,9 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand) -> Result<String> {
             ordinal,
             auto_promote,
         } => {
-            let repo_id: RepoId = repo.parse().map_err(|_| {
-                crate::error::RestackError::RepoNotFound(RepoId::new())
-            })?;
+            let repo_id: RepoId = repo
+                .parse()
+                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
             let env = env_service::add_env(conn, &repo_id, name, branch, *ordinal, *auto_promote)?;
             Ok(serde_json::to_string_pretty(&env)?)
         }
@@ -79,17 +79,19 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand) -> Result<String> {
                 }
                 Ok(serde_json::to_string_pretty(&results)?)
             } else {
-                let repo_id = repo.as_ref().map(|r| r.parse::<RepoId>()).transpose().map_err(|_| {
-                    crate::error::RestackError::RepoNotFound(RepoId::new())
-                })?;
+                let repo_id = repo
+                    .as_ref()
+                    .map(|r| r.parse::<RepoId>())
+                    .transpose()
+                    .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
                 let envs = env_service::list_envs(conn, repo_id.as_ref())?;
                 Ok(serde_json::to_string_pretty(&envs)?)
             }
         }
         EnvCommand::Status { id } => {
-            let env_id = id.parse().map_err(|_| {
-                crate::error::RestackError::EnvNotFound(crate::id::EnvId::new())
-            })?;
+            let env_id = id
+                .parse()
+                .map_err(|_| crate::error::RestackError::EnvNotFound(crate::id::EnvId::new()))?;
             let status = env_service::get_env_status(conn, &env_id)?;
             Ok(serde_json::to_string_pretty(&status)?)
         }
