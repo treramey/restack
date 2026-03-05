@@ -185,9 +185,9 @@ pub fn log_merges(repo: &Path, branch: &str, limit: usize) -> GitResult<Vec<Merg
     output
         .lines()
         .map(|line| {
-            let (sha, subject) = line.split_once("|||").ok_or_else(|| {
-                GitError::Parse(format!("unexpected merge log format: {line}"))
-            })?;
+            let (sha, subject) = line
+                .split_once("|||")
+                .ok_or_else(|| GitError::Parse(format!("unexpected merge log format: {line}")))?;
             Ok(MergeLogEntry {
                 sha: sha.to_string(),
                 subject: subject.to_string(),
@@ -289,11 +289,7 @@ pub fn merge_tree(repo: &Path, ours: &str, theirs: &str) -> GitResult<MergeTreeR
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     if output.status.success() {
-        let tree_oid = stdout
-            .lines()
-            .next()
-            .unwrap_or("")
-            .to_string();
+        let tree_oid = stdout.lines().next().unwrap_or("").to_string();
         Ok(MergeTreeResult::Success { tree_oid })
     } else if output.status.code() == Some(1) {
         // Exit code 1 = conflicts
@@ -352,7 +348,9 @@ pub fn resolve_ref(repo: &Path, refspec: &str) -> GitResult<String> {
 pub fn describe_latest_tag(repo: &Path) -> GitResult<Option<String>> {
     match run_git(repo, &["describe", "--tags", "--abbrev=0"]) {
         Ok(tag) => Ok(Some(tag)),
-        Err(GitError::CommandFailed { stderr, .. }) if stderr.contains("No names found") || stderr.contains("No tags can describe") => {
+        Err(GitError::CommandFailed { stderr, .. })
+            if stderr.contains("No names found") || stderr.contains("No tags can describe") =>
+        {
             Ok(None)
         }
         Err(e) => Err(e),
@@ -376,7 +374,8 @@ pub fn describe_latest_tag_from(repo: &Path, commitish: &str) -> GitResult<Optio
 /// Get commit subjects (one-line) since `since_ref`. If `since_ref` is None,
 /// returns all commits on HEAD.
 pub fn log_since(repo: &Path, since_ref: Option<&str>, format: &str) -> GitResult<Vec<String>> {
-    let mut args = vec!["log", "--format", format];
+    let format_arg = format!("--format={format}");
+    let mut args = vec!["log", &format_arg];
     let range;
     if let Some(r) = since_ref {
         range = format!("{r}..HEAD");
@@ -632,5 +631,61 @@ mod tests {
         let commits = parse_conventional_commits(&subjects);
         assert_eq!(commits.len(), 1);
         assert_eq!(commits[0].commit_type, "feat");
+    }
+
+    #[test]
+    fn test_log_since_percent_format() {
+        use std::process::Command;
+
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let repo_path = temp_dir.path();
+
+        Command::new("git")
+            .args(["init"])
+            .current_dir(repo_path)
+            .status()
+            .expect("git init");
+
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(repo_path)
+            .status()
+            .expect("git config email");
+
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(repo_path)
+            .status()
+            .expect("git config name");
+
+        std::fs::write(repo_path.join("test.txt"), "hello").expect("create test file");
+
+        Command::new("git")
+            .args(["add", "test.txt"])
+            .current_dir(repo_path)
+            .status()
+            .expect("git add");
+
+        Command::new("git")
+            .args(["commit", "-m", "test commit"])
+            .current_dir(repo_path)
+            .status()
+            .expect("git commit");
+
+        let result = log_since(repo_path, None, "%H|||%s").expect("log_since should succeed");
+
+        assert!(!result.is_empty(), "should have at least one commit");
+        for line in &result {
+            assert!(
+                line.contains("|||"),
+                "each line should contain '|||' separator, got: {line}"
+            );
+            let parts: Vec<_> = line.split("|||").collect();
+            assert_eq!(parts.len(), 2, "should have sha and subject: {line}");
+            assert_eq!(
+                parts[1], "test commit",
+                "subject should match commit message"
+            );
+        }
     }
 }
