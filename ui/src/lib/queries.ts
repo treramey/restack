@@ -68,7 +68,7 @@ export function useTopics() {
 export function useEnvironments() {
   return useQuery({
     queryKey: queryKeys.environments.list(),
-    queryFn: () => apiFetch<Environment[]>("/api/environments"),
+    queryFn: () => apiFetch<Environment[]>("/api/envs"),
   });
 }
 

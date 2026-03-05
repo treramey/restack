@@ -9,6 +9,8 @@ import type { StatusCode } from "hono/utils/http-status";
 import { callCli } from "./cli.js";
 import { CliError } from "./types.js";
 
+const WS_OPEN = 1;
+
 type WsClient = { send: (data: string) => void; readyState: number };
 const wsClients = new Set<WsClient>();
 
@@ -20,7 +22,7 @@ export type WsEvent = {
 function broadcast(event: WsEvent) {
   const data = JSON.stringify(event);
   for (const client of wsClients) {
-    if (client.readyState === 1) {
+    if (client.readyState === WS_OPEN) {
       client.send(data);
     }
   }
@@ -254,6 +256,9 @@ function createEnvRoutes() {
 
 /**
  * Promote routes
+ * 
+ * Requires repoId from client - eliminates TOCTOU race condition from
+ * sequential CLI calls during topic/repo lookup.
  */
 function createPromoteRoutes() {
   return new Hono()
@@ -269,31 +274,19 @@ function createPromoteRoutes() {
 
       const topicId = requireString(body, "topicId");
       const envId = requireString(body, "envId");
+      const repoId = requireString(body, "repoId");
       if (!topicId) return c.json({ error: "topicId is required" }, 400);
       if (!envId) return c.json({ error: "envId is required" }, 400);
+      if (!repoId) return c.json({ error: "repoId is required" }, 400);
 
       try {
-        const reposResult = await callCli(["repo", "list"]);
-        const repos = reposResult as Array<{ id: string }>;
-        let repoId: string | undefined;
-        let topicBranch: string | undefined;
-
-        for (const repo of repos) {
-          const topicsResult = await callCli(["topic", "list", "--repo", repo.id]);
-          const topics = topicsResult as Array<{ id: string; branch: string }>;
-          const topic = topics.find((t) => t.id === topicId);
-          if (topic) {
-            repoId = repo.id;
-            topicBranch = topic.branch;
-            break;
-          }
-        }
-
-        if (!repoId) return c.json({ error: "Topic not found" }, 404);
-
         const envResult = await callCli(["env", "list", "--repo", repoId]);
-        const envs = envResult as Array<{ id: string; name: string }>;
-        const env = envs.find((e) => e.id === envId);
+        if (!Array.isArray(envResult)) {
+          return c.json({ error: "Invalid environment list response" }, 500);
+        }
+        const env = envResult.find((e): e is { id: string; name: string } => 
+          typeof e === "object" && e !== null && "id" in e && "name" in e && e.id === envId
+        );
         if (!env) return c.json({ error: "Environment not found" }, 404);
 
         const result = await callCli([
@@ -318,28 +311,19 @@ function createPromoteRoutes() {
 
       const topicId = requireString(body, "topicId");
       const envId = requireString(body, "envId");
+      const repoId = requireString(body, "repoId");
       if (!topicId) return c.json({ error: "topicId is required" }, 400);
       if (!envId) return c.json({ error: "envId is required" }, 400);
+      if (!repoId) return c.json({ error: "repoId is required" }, 400);
 
       try {
-        const reposResult = await callCli(["repo", "list"]);
-        const repos = reposResult as Array<{ id: string }>;
-        let repoId: string | undefined;
-
-        for (const repo of repos) {
-          const topicsResult = await callCli(["topic", "list", "--repo", repo.id]);
-          const topics = topicsResult as Array<{ id: string }>;
-          if (topics.find((t) => t.id === topicId)) {
-            repoId = repo.id;
-            break;
-          }
-        }
-
-        if (!repoId) return c.json({ error: "Topic not found" }, 404);
-
         const envResult = await callCli(["env", "list", "--repo", repoId]);
-        const envs = envResult as Array<{ id: string; name: string }>;
-        const env = envs.find((e) => e.id === envId);
+        if (!Array.isArray(envResult)) {
+          return c.json({ error: "Invalid environment list response" }, 500);
+        }
+        const env = envResult.find((e): e is { id: string; name: string } => 
+          typeof e === "object" && e !== null && "id" in e && "name" in e && e.id === envId
+        );
         if (!env) return c.json({ error: "Environment not found" }, 404);
 
         const result = await callCli([
@@ -486,16 +470,20 @@ export function createUiApp(staticRoot: string) {
         return c.json({ error: "Invalid JSON body" }, 400);
       }
 
-      const queryKeys = body.queryKeys as string[][] | undefined;
-      if (queryKeys && Array.isArray(queryKeys)) {
-        broadcastInvalidate(...queryKeys);
+      const rawQueryKeys = body.queryKeys;
+      if (
+        Array.isArray(rawQueryKeys) &&
+        rawQueryKeys.every(
+          (k) => Array.isArray(k) && k.every((s) => typeof s === "string")
+        )
+      ) {
+        broadcastInvalidate(...(rawQueryKeys as string[][]));
       }
       return c.json({ broadcasted: true });
     })
     .route("/api/repos", createRepoRoutes())
     .route("/api/topics", createTopicRoutes())
     .route("/api/envs", createEnvRoutes())
-    .route("/api/environments", createEnvRoutes())
     .route("/api/promote", createPromoteRoutes())
     .route("/api/rebuild", createRebuildRoutes())
     .route("/api/rebuilds", createRebuildsRoutes())

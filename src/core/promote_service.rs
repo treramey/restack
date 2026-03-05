@@ -40,7 +40,7 @@ pub fn promote_to(
 
         // Trigger rebuild
         let rebuild = rebuild_service::rebuild_env(conn, &env.id, this_repo_path, false, false)?;
-        let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id).unwrap_or_default();
+        let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id)?;
 
         Ok(PromoteResult {
             topic,
@@ -81,7 +81,7 @@ pub fn demote_from(
 
         // Trigger rebuild
         let rebuild = rebuild_service::rebuild_env(conn, &env.id, this_repo_path, false, false)?;
-        let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id).unwrap_or_default();
+        let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id)?;
 
         Ok(PromoteResult {
             topic,
@@ -196,7 +196,7 @@ pub fn promote_auto(conn: &Connection) -> Result<AutoPromoteResult> {
         // Rebuild each changed env exactly once and backfill the rebuild into promoted entries
         for env_id in &envs_needing_rebuild {
             let rebuild = rebuild_service::rebuild_env(conn, env_id, this_repo_path, false, false)?;
-            let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id).unwrap_or_default();
+            let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id)?;
             for pr in promoted.iter_mut() {
                 if pr.env.id == *env_id {
                     pr.rebuild = Some(rebuild.clone());

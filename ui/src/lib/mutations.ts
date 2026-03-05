@@ -24,11 +24,11 @@ import type {
 export function usePromote() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ topicId, envId }: { topicId: TopicId; envId: EnvId }) =>
+    mutationFn: ({ topicId, envId, repoId }: { topicId: TopicId; envId: EnvId; repoId: string }) =>
       apiFetch<{ conflicts: Conflict[] }>("/api/promote/to", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topicId, envId }),
+        body: JSON.stringify({ topicId, envId, repoId }),
       }),
     onSuccess: (result) => {
       void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });
@@ -37,11 +37,9 @@ export function usePromote() {
       void qc.invalidateQueries({ queryKey: queryKeys.conflicts.all });
 
       if (result.conflicts && result.conflicts.length > 0) {
-        for (const c of result.conflicts) {
-          toast.error("Merge conflict detected", {
-            description: `Topic could not be merged and was removed from the environment.`,
-          });
-        }
+        toast.error("Merge conflict detected", {
+          description: `${result.conflicts.length} topic${result.conflicts.length > 1 ? "s" : ""} could not be merged and were removed from the environment.`,
+        });
       }
     },
   });
@@ -51,11 +49,11 @@ export function usePromote() {
 export function useDemote() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ topicId, envId }: { topicId: TopicId; envId: EnvId }) =>
+    mutationFn: ({ topicId, envId, repoId }: { topicId: TopicId; envId: EnvId; repoId: string }) =>
       apiFetch<void>("/api/promote/from", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topicId, envId }),
+        body: JSON.stringify({ topicId, envId, repoId }),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });

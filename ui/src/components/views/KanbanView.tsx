@@ -315,13 +315,15 @@ export function KanbanView() {
               setFocusedCard(cardIndex);
               setSelectedTopicId(topic.id);
             }}
-            onPromote={(topicId) => {
-              const next = nextEnv(lane.env.id);
-              if (next) promote.mutate({ topicId, envId: next.id });
-            }}
-            onDemote={(topicId) => {
-              demote.mutate({ topicId, envId: lane.env.id });
-            }}
+onPromote={(topicId, repoId) => {
+               const next = nextEnv(lane.env.id);
+               if (next) promote.mutate({ topicId, envId: next.id, repoId });
+             }}
+             onDemote={(topicId, repoId) => {
+               if (lane.env.id !== "unassigned") {
+                 demote.mutate({ topicId, envId: lane.env.id, repoId });
+               }
+             }}
             onRebuild={() => {
               rebuild.mutate({ envId: lane.env.id });
             }}
@@ -353,8 +355,8 @@ interface LaneColumnProps {
   isMutating: boolean;
   onCardRef: (id: TopicId, el: HTMLDivElement | null) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
-  onPromote: (topicId: TopicId) => void;
-  onDemote: (topicId: TopicId) => void;
+  onPromote: (topicId: TopicId, repoId: string) => void;
+  onDemote: (topicId: TopicId, repoId: string) => void;
   onRebuild: () => void;
 }
 
@@ -443,24 +445,25 @@ function LaneColumn({
                 No topics
               </div>
             ) : (
-              topics.map((topic, cardIndex) => (
-                <TopicCard
-                  key={topic.id}
-                  topic={topic}
-                  conflicts={conflictsForTopic(topic.id, conflicts)}
-                  cardIndex={cardIndex}
-                  isFocused={
-                    isCurrentLane && focusedCardIndex === cardIndex
-                  }
-                  isSelected={selectedTopicId === topic.id}
-                  nextEnv={nextEnv}
-                  isMutating={isMutating}
-                  onRef={onCardRef}
-                  onSelect={onSelect}
-                  onPromote={onPromote}
-                  onDemote={onDemote}
-                />
-              ))
+topics.map((topic, cardIndex) => (
+                 <TopicCard
+                   key={topic.id}
+                   topic={topic}
+                   conflicts={conflictsForTopic(topic.id, conflicts)}
+                   cardIndex={cardIndex}
+                   isFocused={
+                     isCurrentLane && focusedCardIndex === cardIndex
+                   }
+                   isSelected={selectedTopicId === topic.id}
+                   nextEnv={nextEnv}
+                   isUnassignedLane={isUnassigned}
+                   isMutating={isMutating}
+                   onRef={onCardRef}
+                   onSelect={onSelect}
+                   onPromote={onPromote}
+                   onDemote={onDemote}
+                 />
+               ))
             )}
           </div>
         </div>
@@ -478,11 +481,12 @@ interface TopicCardProps {
   isFocused: boolean;
   isSelected: boolean;
   nextEnv: Environment | undefined;
+  isUnassignedLane: boolean;
   isMutating: boolean;
   onRef: (id: TopicId, el: HTMLDivElement | null) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
-  onPromote: (topicId: TopicId) => void;
-  onDemote: (topicId: TopicId) => void;
+  onPromote: (topicId: TopicId, repoId: string) => void;
+  onDemote: (topicId: TopicId, repoId: string) => void;
 }
 
 function TopicCard({
@@ -492,6 +496,7 @@ function TopicCard({
   isFocused,
   isSelected,
   nextEnv,
+  isUnassignedLane,
   isMutating,
   onRef,
   onSelect,
@@ -600,20 +605,20 @@ function TopicCard({
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
           >
-            {nextEnv && !isGraduated && (
+            {nextEnv && !isGraduated && !isUnassignedLane && (
               <ActionButton
                 label={`→ ${nextEnv.name}`}
                 title={`Promote to ${nextEnv.name}`}
                 disabled={isMutating}
-                onClick={() => onPromote(topic.id)}
+                onClick={() => onPromote(topic.id, topic.repoId)}
               />
             )}
-            {!isGraduated && (
+            {!isGraduated && !isUnassignedLane && (
               <ActionButton
                 label="Archive"
                 title="Hide from board"
                 disabled={isMutating}
-                onClick={() => onDemote(topic.id)}
+                onClick={() => onDemote(topic.id, topic.repoId)}
                 variant="danger"
               />
             )}

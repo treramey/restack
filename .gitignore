@@ -5,6 +5,8 @@ dist/
 
 # Dependencies
 node_modules/
+pnpm-lock.yaml
+yarn.lock
 
 # OS files
 .DS_Store
