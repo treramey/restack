@@ -1,8 +1,12 @@
+use std::path::Path;
+
 use clap::Subcommand;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+use crate::config;
 use crate::core::{discovery_service, repo_service, topic_service};
+use crate::db::repo_repo;
 use crate::error::Result;
 use crate::id::RepoId;
 use crate::types::Topic;
@@ -27,6 +31,14 @@ pub enum TopicCommand {
     },
     /// Archive a topic (hide from board, mark as closed)
     Archive {
+        /// Topic ID or branch name
+        id: String,
+        /// Repo ID
+        #[arg(long)]
+        repo: String,
+    },
+    /// Close a topic: delete branch on origin + local, then remove from DB
+    Close {
         /// Topic ID or branch name
         id: String,
         /// Repo ID
@@ -62,7 +74,7 @@ struct MultiRepoTopics {
     topics: Vec<Topic>,
 }
 
-pub fn handle(conn: &Connection, cmd: &TopicCommand) -> Result<String> {
+pub fn handle(conn: &Connection, cmd: &TopicCommand, workspace_root: &Path) -> Result<String> {
     match cmd {
         TopicCommand::Track { branch, repo } => {
             let repo_id: RepoId = repo
@@ -77,6 +89,33 @@ pub fn handle(conn: &Connection, cmd: &TopicCommand) -> Result<String> {
                 .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
             topic_service::untrack_topic(conn, id, &repo_id)?;
             Ok(serde_json::json!({ "deleted": true }).to_string())
+        }
+        TopicCommand::Close { id, repo } => {
+            let repo_id: RepoId = repo
+                .parse()
+                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
+            let repo_row = repo_repo::get_repo(conn, &repo_id)?;
+            let repo_path = std::path::Path::new(&repo_row.path);
+            let topic = crate::db::topic_repo::get_topic_by_branch(conn, &repo_id, id)?
+                .or_else(|| {
+                    id.parse()
+                        .ok()
+                        .and_then(|tid| crate::db::topic_repo::get_topic(conn, &tid).ok())
+                })
+                .ok_or_else(|| {
+                    crate::error::RestackError::TopicNotFound(id.parse().unwrap_or_default())
+                })?;
+
+            // Delete remote branch (best-effort)
+            let _ = crate::git::branch_delete(repo_path, &topic.branch, true);
+            // Delete local branch (best-effort, may fail if checked out)
+            let _ = crate::git::branch_delete(repo_path, &topic.branch, false);
+
+            // Remove from all environments and delete from DB
+            crate::db::topic_env_repo::remove_topic_from_all_envs(conn, &topic.id)?;
+            crate::db::topic_repo::delete_topic(conn, &topic.id)?;
+
+            Ok(serde_json::json!({ "deleted": true, "branch": topic.branch }).to_string())
         }
         TopicCommand::Archive { id, repo } => {
             let repo_id: RepoId = repo
@@ -95,6 +134,28 @@ pub fn handle(conn: &Connection, cmd: &TopicCommand) -> Result<String> {
             Ok(serde_json::to_string_pretty(&archived)?)
         }
         TopicCommand::List { repo, all_repos } => {
+            // Auto-discover new branches before listing
+            let config_path = workspace_root.join(".restack/config.toml");
+            let cfg = if config_path.exists() {
+                config::load_config(&config_path)?
+            } else {
+                config::default_config()
+            };
+
+            let repos_to_discover = if let Some(r) = repo {
+                let repo_id: RepoId = r
+                    .parse()
+                    .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
+                vec![repo_repo::get_repo(conn, &repo_id)?]
+            } else {
+                repo_repo::list_repos(conn).unwrap_or_default()
+            };
+
+            for r in &repos_to_discover {
+                let repo_path = std::path::Path::new(&r.path);
+                let _ = discovery_service::discover_topics(conn, &r.id, repo_path, &cfg);
+            }
+
             if *all_repos {
                 let repos = repo_service::list_repos(conn)?;
                 let mut results = Vec::new();

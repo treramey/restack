@@ -80,7 +80,8 @@ fn close_deleted_topics(conn: &Connection, repo_id: &RepoId, repo_path: &Path) -
         let remote_exists = git::remote_branch_exists(repo_path, &topic.branch)?;
 
         if !local_exists && !remote_exists {
-            topic_repo::update_topic_status(conn, &topic.id, TopicStatus::Closed)?;
+            crate::db::topic_env_repo::remove_topic_from_all_envs(conn, &topic.id)?;
+            topic_repo::delete_topic(conn, &topic.id)?;
             closed += 1;
         }
     }

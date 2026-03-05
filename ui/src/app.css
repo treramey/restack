@@ -5,50 +5,68 @@
  * Maps semantic names to rose-pine values for use in Tailwind classes.
  */
 @theme {
+  /* ── Rosé Pine (official palette) ─────────────────────────────────── */
+  /* Base: #191724  Surface: #1f1d2e  Overlay: #26233a                  */
+  /* Muted: #6e6a86  Subtle: #908caa  Text: #e0def4                     */
+  /* Love: #eb6f92  Gold: #f6c177  Rose: #ebbcba                        */
+  /* Pine: #31748f  Foam: #9ccfd8  Iris: #c4a7e7                        */
+  /* HL Low: #21202e  HL Med: #403d52  HL High: #524f67                 */
+
   /* Background surfaces */
-  --color-bg-primary: #191724;
-  --color-bg-secondary: #1f1d2e;
+  --color-bg-primary: #191724;       /* base */
+  --color-bg-secondary: #1f1d2e;     /* surface */
 
   /* Surfaces (cards, panels) */
-  --color-surface-primary: #26233a;
-  --color-surface-secondary: #2a273f;
+  --color-surface-primary: #26233a;  /* overlay */
+  --color-surface-secondary: #2a273f; /* moon surface — slightly lifted */
 
   /* Text */
-  --color-text-primary: #e0def4;
-  --color-text-muted: #908caa;
-  --color-text-dim: #6e6a86;
+  --color-text-primary: #e0def4;     /* text */
+  --color-text-muted: #908caa;       /* subtle */
+  --color-text-dim: #6e6a86;         /* muted */
 
-  /* Accent (iris / purple) */
-  --color-accent: #c4a7e7;
-  --color-accent-muted: #a08dc7;
+  /* Accent (iris) */
+  --color-accent: #c4a7e7;           /* iris */
+  --color-accent-muted: #908caa;     /* subtle */
   --color-accent-subtle: oklch(from #c4a7e7 l c h / 0.15);
 
   /* Borders */
-  --color-border: #393552;
-  --color-border-hover: #524f67;
-  --color-border-focus: #c4a7e7;
+  --color-border: #403d52;           /* highlight med */
+  --color-border-hover: #524f67;     /* highlight high */
+  --color-border-focus: #c4a7e7;     /* iris */
 
   /* Status — environment colors */
-  --color-env-dev: #9ccfd8;
-  --color-env-staging: #f6c177;
-  --color-env-production: #31748f;
-  --color-env-conflict: #eb6f92;
-  --color-env-unassigned: #6e6a86;
+  --color-env-dev: #9ccfd8;          /* foam */
+  --color-env-staging: #f6c177;      /* gold */
+  --color-env-production: #31748f;   /* pine */
+  --color-env-conflict: #eb6f92;     /* love */
+  --color-env-unassigned: #6e6a86;   /* muted */
 
   /* Status — topic / CI */
-  --color-status-active: #9ccfd8;
-  --color-status-conflict: #eb6f92;
-  --color-status-graduated: #31748f;
-  --color-status-closed: #6e6a86;
-  --color-status-ci-pending: #f6c177;
-  --color-status-ci-passed: #9ccfd8;
-  --color-status-ci-failed: #eb6f92;
+  --color-status-active: #9ccfd8;    /* foam */
+  --color-status-conflict: #eb6f92;  /* love */
+  --color-status-graduated: #31748f; /* pine */
+  --color-status-closed: #6e6a86;    /* muted */
+  --color-status-ci-pending: #f6c177; /* gold */
+  --color-status-ci-passed: #9ccfd8; /* foam */
+  --color-status-ci-failed: #eb6f92; /* love */
 
   /* Rebuild */
-  --color-rebuild-running: #f6c177;
-  --color-rebuild-success: #9ccfd8;
-  --color-rebuild-partial: #ebbcba;
-  --color-rebuild-failed: #eb6f92;
+  --color-rebuild-running: #f6c177;  /* gold */
+  --color-rebuild-success: #9ccfd8;  /* foam */
+  --color-rebuild-partial: #ebbcba;  /* rose */
+  --color-rebuild-failed: #eb6f92;   /* love */
+
+  /* Rosé Pine primitives (for direct use) */
+  --color-love: #eb6f92;
+  --color-gold: #f6c177;
+  --color-rose: #ebbcba;
+  --color-pine: #31748f;
+  --color-foam: #9ccfd8;
+  --color-iris: #c4a7e7;
+  --color-hl-low: #21202e;
+  --color-hl-med: #403d52;
+  --color-hl-high: #524f67;
 }
 
 /* Base resets */
@@ -74,4 +92,28 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-border-hover);
+}
+
+/* ReactFlow controls — dark theme */
+.react-flow__controls {
+  background: var(--color-surface-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.react-flow__controls-button {
+  background: var(--color-surface-primary);
+  border-bottom: 1px solid var(--color-border);
+  fill: var(--color-text-muted);
+  color: var(--color-text-muted);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--color-surface-secondary);
+  fill: var(--color-text-primary);
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: none;
 }

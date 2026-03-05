@@ -5,6 +5,7 @@
  * - Bottom: Collapsible detail panel
  */
 
+import { useEffect } from "react";
 import { useUIStore, type ViewMode } from "./lib/store.js";
 import { useWebSocketSync } from "./lib/websocket.js";
 import { Header } from "./components/Header.js";
@@ -15,7 +16,32 @@ import { Toaster } from "sonner";
 
 export function App() {
   const viewMode = useUIStore((s) => s.viewMode);
+  const setViewMode = useUIStore((s) => s.setViewMode);
+  const toggleDetailPanel = useUIStore((s) => s.toggleDetailPanel);
   useWebSocketSync();
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      switch (e.key) {
+        case "1":
+          setViewMode("kanban");
+          break;
+        case "2":
+          setViewMode("canvas");
+          break;
+        case "3":
+          setViewMode("list");
+          break;
+        case "D":
+        case "d":
+          toggleDetailPanel();
+          break;
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [setViewMode, toggleDetailPanel]);
 
   return (
     <div className="flex flex-col h-screen bg-bg-primary text-text-primary">

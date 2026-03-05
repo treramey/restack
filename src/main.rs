@@ -19,8 +19,8 @@ mod types;
 mod version;
 
 use commands::{
-    conflicts::ConflictsCommand, env::EnvCommand, promote::PromoteCommand, rebuild::RebuildCommand,
-    repo::RepoCommand, topic::TopicCommand,
+    conflicts::ConflictsCommand, env::EnvCommand, pr::PrCommand, promote::PromoteCommand,
+    rebuild::RebuildCommand, repo::RepoCommand, topic::TopicCommand,
 };
 use output::Printer;
 
@@ -99,6 +99,10 @@ enum Command {
     /// List conflicts
     #[command(subcommand)]
     Conflicts(ConflictsCommand),
+
+    /// Pull request management
+    #[command(subcommand)]
+    Pr(PrCommand),
 
     /// Generate shell completions
     Completions {
@@ -226,7 +230,8 @@ fn run(command: &Command, db_path: &Path) -> error::Result<String> {
         }
         Command::Topic(cmd) => {
             let conn = db::open_db(db_path)?;
-            commands::topic::handle(&conn, cmd)
+            let cwd = std::env::current_dir()?;
+            commands::topic::handle(&conn, cmd, &cwd)
         }
         Command::Env(cmd) => {
             let conn = db::open_db(db_path)?;
@@ -245,6 +250,10 @@ fn run(command: &Command, db_path: &Path) -> error::Result<String> {
         Command::Conflicts(cmd) => {
             let conn = db::open_db(db_path)?;
             commands::conflicts::handle(&conn, cmd)
+        }
+        Command::Pr(cmd) => {
+            let conn = db::open_db(db_path)?;
+            commands::pr::handle(&conn, cmd)
         }
         Command::Completions { .. } => unreachable!("completions handled before run()"),
         Command::Ui { .. } => unreachable!("ui handled before run()"),

@@ -9,7 +9,7 @@
   "scripts": {
     "build": "tsc",
     "build:check": "tsc --noEmit",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/index.ts ui --static-root ../ui/dist --port 6969",
     "typecheck": "tsc --noEmit",
     "mcp": "tsx src/index.ts mcp"
   },

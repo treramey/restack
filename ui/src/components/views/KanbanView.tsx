@@ -26,8 +26,9 @@ import {
   useTopicEnvironments,
   useRebuildStatus,
   useConflicts,
+  useRepos,
 } from "../../lib/queries.js";
-import { usePromote, useDemote, useRebuild } from "../../lib/mutations.js";
+import { usePromote, useDemote, useRebuild, useCreatePr, useCloseTopic } from "../../lib/mutations.js";
 import { useUIStore } from "../../lib/store.js";
 
 // ============ Helpers ============
@@ -111,10 +112,13 @@ export function KanbanView() {
   const { data: topicEnvs } = useTopicEnvironments();
   const { data: rebuilds } = useRebuildStatus();
   const { data: conflicts } = useConflicts();
+  const { data: repos } = useRepos();
 
   const promote = usePromote();
   const demote = useDemote();
   const rebuild = useRebuild();
+  const createPr = useCreatePr();
+  const closeTopic = useCloseTopic();
 
   // Filter by selected repo
   const environments = useMemo(() => {
@@ -252,12 +256,28 @@ export function KanbanView() {
           }
           break;
         }
+        case "O":
+        case "o": {
+          e.preventDefault();
+          const lane = lanes[focusedLane];
+          const topic = lane?.topics[focusedCard];
+          if (topic && repos) {
+            const repo = repos.find((r) => r.id === topic.repoId);
+            if (repo) {
+              createPr.mutate(
+                { repo: topic.repoId, head: topic.branch, base: repo.baseBranch, title: topic.branch },
+                { onSuccess: (pr) => { if (pr.url) window.open(pr.url, "_blank"); } },
+              );
+            }
+          }
+          break;
+        }
       }
     }
 
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [lanes, focusedLane, focusedCard, setSelectedTopicId]);
+  }, [lanes, focusedLane, focusedCard, setSelectedTopicId, repos, createPr]);
 
   const handleCardRef = useCallback(
     (id: TopicId, el: HTMLDivElement | null) => {
@@ -268,6 +288,22 @@ export function KanbanView() {
       }
     },
     [],
+  );
+
+  const handleGraduate = useCallback(
+    (topic: Topic) => {
+      const repo = repos?.find((r) => r.id === topic.repoId);
+      if (!repo) return;
+      createPr.mutate(
+        { repo: topic.repoId, head: topic.branch, base: repo.baseBranch, title: topic.branch },
+        {
+          onSuccess: (pr) => {
+            if (pr.url) window.open(pr.url, "_blank");
+          },
+        },
+      );
+    },
+    [repos, createPr],
   );
 
   // Loading state
@@ -292,7 +328,8 @@ export function KanbanView() {
     );
   }
 
-  const isMutating = promote.isPending || demote.isPending || rebuild.isPending;
+  const isMutating =
+    promote.isPending || demote.isPending || rebuild.isPending || createPr.isPending || closeTopic.isPending;
 
   return (
     <div className="flex-1 flex flex-col bg-bg-primary overflow-hidden">
@@ -309,24 +346,27 @@ export function KanbanView() {
             selectedTopicId={selectedTopicId}
             nextEnv={nextEnv(lane.env.id)}
             isMutating={isMutating}
+            isLastEnvLane={laneIndex === lanes.length - 1 && lane.env.id !== "unassigned"}
             onCardRef={handleCardRef}
             onSelect={(topic, cardIndex) => {
               setFocusedLane(laneIndex);
               setFocusedCard(cardIndex);
               setSelectedTopicId(topic.id);
             }}
-onPromote={(topicId, repoId) => {
-               const next = nextEnv(lane.env.id);
-               if (next) promote.mutate({ topicId, envId: next.id, repoId });
-             }}
-             onDemote={(topicId, repoId) => {
-               if (lane.env.id !== "unassigned") {
-                 demote.mutate({ topicId, envId: lane.env.id, repoId });
-               }
-             }}
+            onPromote={(topicId, repoId) => {
+              const next = nextEnv(lane.env.id);
+              if (next) promote.mutate({ topicId, envId: next.id, repoId });
+            }}
+            onDemote={(topicId, repoId) => {
+              if (lane.env.id !== "unassigned") {
+                demote.mutate({ topicId, envId: lane.env.id, repoId });
+              }
+            }}
             onRebuild={() => {
               rebuild.mutate({ envId: lane.env.id });
             }}
+            onGraduate={handleGraduate}
+            onClose={(topicId, repoId) => closeTopic.mutate({ topicId, repoId })}
           />
         ))}
       </div>
@@ -335,7 +375,8 @@ onPromote={(topicId, repoId) => {
       <div className="px-4 py-2 border-t border-border text-xs text-text-dim font-mono flex-shrink-0">
         <span className="opacity-70">h/l</span> lanes{" "}
         <span className="opacity-70">j/k</span> navigate{" "}
-        <span className="opacity-70">Enter</span> select
+        <span className="opacity-70">Enter</span> select{" "}
+        <span className="opacity-70">O</span> create PR
       </div>
     </div>
   );
@@ -353,11 +394,14 @@ interface LaneColumnProps {
   selectedTopicId: TopicId | null;
   nextEnv: Environment | undefined;
   isMutating: boolean;
+  isLastEnvLane: boolean;
   onCardRef: (id: TopicId, el: HTMLDivElement | null) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
   onPromote: (topicId: TopicId, repoId: string) => void;
   onDemote: (topicId: TopicId, repoId: string) => void;
   onRebuild: () => void;
+  onGraduate: (topic: Topic) => void;
+  onClose: (topicId: TopicId, repoId: string) => void;
 }
 
 function LaneColumn({
@@ -370,11 +414,14 @@ function LaneColumn({
   selectedTopicId,
   nextEnv,
   isMutating,
+  isLastEnvLane,
   onCardRef,
   onSelect,
   onPromote,
   onDemote,
   onRebuild,
+  onGraduate,
+  onClose,
 }: LaneColumnProps) {
   const isUnassigned = env.id === "unassigned";
 
@@ -457,11 +504,14 @@ topics.map((topic, cardIndex) => (
                    isSelected={selectedTopicId === topic.id}
                    nextEnv={nextEnv}
                    isUnassignedLane={isUnassigned}
+                   isLastEnvLane={isLastEnvLane}
                    isMutating={isMutating}
                    onRef={onCardRef}
                    onSelect={onSelect}
                    onPromote={onPromote}
                    onDemote={onDemote}
+                   onGraduate={onGraduate}
+                   onClose={onClose}
                  />
                ))
             )}
@@ -482,11 +532,14 @@ interface TopicCardProps {
   isSelected: boolean;
   nextEnv: Environment | undefined;
   isUnassignedLane: boolean;
+  isLastEnvLane: boolean;
   isMutating: boolean;
   onRef: (id: TopicId, el: HTMLDivElement | null) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
   onPromote: (topicId: TopicId, repoId: string) => void;
   onDemote: (topicId: TopicId, repoId: string) => void;
+  onGraduate: (topic: Topic) => void;
+  onClose: (topicId: TopicId, repoId: string) => void;
 }
 
 function TopicCard({
@@ -497,12 +550,18 @@ function TopicCard({
   isSelected,
   nextEnv,
   isUnassignedLane,
+  isLastEnvLane,
   isMutating,
   onRef,
   onSelect,
   onPromote,
   onDemote,
+  onGraduate,
+  onClose,
 }: TopicCardProps) {
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [closeInput, setCloseInput] = useState("");
+
   const handleRef = useCallback(
     (el: HTMLDivElement | null) => {
       onRef(topic.id, el);
@@ -547,7 +606,7 @@ function TopicCard({
 
           {/* Status badges row */}
           <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-            {topic.status !== "active" && (
+            {topic.status !== "active" && topic.status !== "closed" && (
               <span
                 className={`px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${STATUS_BADGE_COLORS[topic.status]}`}
               >
@@ -613,16 +672,96 @@ function TopicCard({
                 onClick={() => onPromote(topic.id, topic.repoId)}
               />
             )}
+            {isLastEnvLane && !isGraduated && (
+              <ActionButton
+                label="Graduate →"
+                title="Create PR to merge into master"
+                disabled={isMutating}
+                onClick={() => onGraduate(topic)}
+              />
+            )}
             {!isGraduated && !isUnassignedLane && (
               <ActionButton
                 label="Archive"
-                title="Hide from board"
+                title="Remove from environment"
                 disabled={isMutating}
                 onClick={() => onDemote(topic.id, topic.repoId)}
                 variant="danger"
               />
             )}
+            {isUnassignedLane && !isGraduated && (
+              <ActionButton
+                label="Close"
+                title="Delete branch from origin and local"
+                disabled={isMutating}
+                onClick={() => setShowCloseConfirm(true)}
+                variant="danger"
+              />
+            )}
           </div>
+
+          {/* Close confirmation modal */}
+          {showCloseConfirm && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+              onClick={(e) => { e.stopPropagation(); setShowCloseConfirm(false); setCloseInput(""); }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <div
+                className="bg-surface-primary border border-border rounded-lg p-4 w-[400px] shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-sm font-mono font-bold text-text-primary mb-2">
+                  Delete branch?
+                </h3>
+                <p className="text-xs font-mono text-text-muted mb-3">
+                  This will delete <span className="text-status-conflict font-bold">{topic.branch}</span> from
+                  both origin and local. This cannot be undone.
+                </p>
+                <p className="text-xs font-mono text-text-dim mb-2">
+                  Type the branch name to confirm:
+                </p>
+                <input
+                  type="text"
+                  value={closeInput}
+                  onChange={(e) => setCloseInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Escape") { setShowCloseConfirm(false); setCloseInput(""); }
+                    if (e.key === "Enter" && closeInput === topic.branch) {
+                      onClose(topic.id, topic.repoId);
+                      setShowCloseConfirm(false);
+                      setCloseInput("");
+                    }
+                  }}
+                  className="w-full px-2 py-1.5 rounded border border-border bg-bg-primary text-text-primary font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent mb-3"
+                  placeholder={topic.branch}
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowCloseConfirm(false); setCloseInput(""); }}
+                    className="text-xs font-mono px-3 py-1 rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={closeInput !== topic.branch}
+                    onClick={() => {
+                      onClose(topic.id, topic.repoId);
+                      setShowCloseConfirm(false);
+                      setCloseInput("");
+                    }}
+                    className="text-xs font-mono px-3 py-1 rounded border border-status-conflict/50 text-status-conflict hover:bg-status-conflict/10 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    Delete branch
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
     </div>
   );

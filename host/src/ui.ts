@@ -179,6 +179,20 @@ function createTopicRoutes() {
       }
     })
 
+    .post("/:id/close", async (c) => {
+      const id = c.req.param("id");
+      const repo = c.req.query("repo");
+      if (!repo) return c.json({ error: "repo query param is required" }, 400);
+
+      try {
+        const result = await callCli(["topic", "close", "--repo", repo, id]);
+        broadcastInvalidate(["topics", "topicEnvironments"]);
+        return c.json(result);
+      } catch (err) {
+        return handleCliError(c, err);
+      }
+    })
+
     .get("/:id/status", async (c) => {
       const id = c.req.param("id");
       const repo = c.req.query("repo");
@@ -437,6 +451,76 @@ function createConflictsRoutes() {
   });
 }
 
+/**
+ * PR routes
+ */
+function createPrRoutes() {
+  return new Hono()
+    .post("/create", async (c) => {
+      let body: Record<string, unknown>;
+      try {
+        const raw: unknown = await c.req.json();
+        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
+        body = raw;
+      } catch {
+        return c.json({ error: "Invalid JSON body" }, 400);
+      }
+
+      const repo = requireString(body, "repo");
+      const head = requireString(body, "head");
+      const base = requireString(body, "base");
+      const title = requireString(body, "title");
+      if (!repo) return c.json({ error: "repo is required" }, 400);
+      if (!head) return c.json({ error: "head is required" }, 400);
+      if (!base) return c.json({ error: "base is required" }, 400);
+      if (!title) return c.json({ error: "title is required" }, 400);
+
+      const args = ["pr", "create", "--repo", repo, "--head", head, "--base", base, "--title", title];
+      const prBody = requireString(body, "body");
+      if (prBody) args.push("--body", prBody);
+      const draft = requireBool(body, "draft");
+      if (draft) args.push("--draft");
+
+      try {
+        const result = await callCli(args);
+        broadcastInvalidate(["topics"]);
+        return c.json(result);
+      } catch (err) {
+        return handleCliError(c, err);
+      }
+    })
+
+    .post("/merge", async (c) => {
+      let body: Record<string, unknown>;
+      try {
+        const raw: unknown = await c.req.json();
+        if (!isObject(raw)) return c.json({ error: "Invalid JSON body" }, 400);
+        body = raw;
+      } catch {
+        return c.json({ error: "Invalid JSON body" }, 400);
+      }
+
+      const repo = requireString(body, "repo");
+      const prNumber = requireNumber(body, "prNumber");
+      if (!repo) return c.json({ error: "repo is required" }, 400);
+      if (prNumber === undefined) return c.json({ error: "prNumber is required" }, 400);
+
+      const args = ["pr", "merge", "--repo", repo, String(prNumber)];
+      const strategy = requireString(body, "strategy");
+      if (strategy) args.push("--strategy", strategy);
+      const deleteBranch = requireBool(body, "deleteBranch");
+      if (deleteBranch) args.push("--delete-branch");
+
+      try {
+        const result = await callCli(args);
+        broadcastInvalidate(["topics"]);
+        return c.json(result);
+      } catch (err) {
+        return handleCliError(c, err);
+      }
+    });
+}
+
 export interface UiServerConfig {
   port: number;
   staticRoot: string;
@@ -490,6 +574,7 @@ export function createUiApp(staticRoot: string) {
     .route("/api/topic-environments", createTopicEnvironmentRoutes())
     .route("/api/conflicts", createConflictsRoutes())
     .route("/api/refresh", createRefreshRoutes())
+    .route("/api/pr", createPrRoutes())
     .all("/api/*", (c) => c.json({ error: "Not found" }, 404))
     .use("/*", serveStatic({ root: staticRoot }))
     .get("/*", serveStatic({ root: staticRoot, path: "index.html" }));
@@ -507,6 +592,16 @@ export async function startUiServer(config: UiServerConfig): Promise<void> {
     },
     (info) => {
       console.log(`Restack UI: http://localhost:${info.port}`);
+
+      // Auto-refresh: discover new branches on startup
+      callCli(["refresh"])
+        .then(() => {
+          broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"], ["conflicts"]);
+          console.log("Auto-refresh complete");
+        })
+        .catch((err: unknown) => {
+          console.warn("Auto-refresh failed:", err instanceof Error ? err.message : String(err));
+        });
     }
   );
 

@@ -151,6 +151,24 @@ export function useRebuild() {
   });
 }
 
+/** Close a topic: delete branch on origin + local, remove from DB. */
+export function useCloseTopic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ topicId, repoId }: { topicId: TopicId; repoId: string }) =>
+      apiFetch<{ deleted: boolean; branch: string }>(`/api/topics/${topicId}/close?repo=${encodeURIComponent(repoId)}`, {
+        method: "POST",
+      }),
+    onSuccess: (result) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });
+      toast.success("Topic closed", {
+        description: `Branch ${result.branch} deleted from origin and local`,
+      });
+    },
+  });
+}
+
 /** Create a pull request. */
 export function useCreatePr() {
   const qc = useQueryClient();

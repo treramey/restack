@@ -238,7 +238,9 @@ const TopicNodeComponent = memo(function TopicNodeComponent({
             >
               {envLabel}
             </span>
-            <span className="text-[9px] font-mono text-text-dim">{topic.status}</span>
+            {topic.status === "conflict" && (
+              <span className="text-[9px] font-mono text-text-dim">conflict</span>
+            )}
           </div>
         </div>
       </div>
@@ -307,7 +309,9 @@ export function CanvasView() {
         style: { stroke: "var(--color-text-dim)", strokeWidth: 1.5 },
       });
 
-      const repoTopics = topicsByRepo.get(repo.id) ?? [];
+      const repoTopics = (topicsByRepo.get(repo.id) ?? []).filter(
+        (t) => t.status !== "closed" && t.status !== "graduated",
+      );
       for (const topic of repoTopics) {
         const { color, label } = resolveTopicEnvColor(
           topic.id,
