@@ -235,7 +235,8 @@ fn run(command: &Command, db_path: &Path) -> error::Result<String> {
         }
         Command::Env(cmd) => {
             let conn = db::open_db(db_path)?;
-            commands::env::handle(&conn, cmd)
+            let cwd = std::env::current_dir()?;
+            commands::env::handle(&conn, cmd, &cwd)
         }
         Command::Promote(cmd) => {
             let conn = db::open_db(db_path)?;

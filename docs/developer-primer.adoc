@@ -1,0 +1,388 @@
+= Restack: A Task-Oriented Developer Primer
+:toc: macro
+:toclevels: 3
+
+toc::[]
+
+== Introduction
+
+Restack is a CLI tool for managing topic branches across integration environments, implementing the
+https://hackernoon.com/how-the-creators-of-git-do-branches-e6fcc57270fb[gitworkflow] branching model.
+
+This document walks through common tasks, from initial setup through the full topic lifecycle. Every example uses the
+`restack` CLI and standard `git` commands.
+
+== Concepts
+
+=== Branches
+
+[cols="1,3"]
+|===
+| Branch | Purpose
+
+| `main` (or `master`)
+| Stable, release-ready code. Topics graduate here when fully tested.
+
+| `staging`
+| Integration testing (UAT). Topics merged here are "done" but may need stabilization.
+  Equivalent to gitworkflow's `next`.
+
+| `dev`
+| Early integration / proposed updates. Raw topics merged here for early feedback and conflict detection.
+  Equivalent to gitworkflow's `pu`.
+
+| `<topic>`
+| Short-lived feature/fix branches. Always branched from `main`. Never commit directly to integration branches.
+|===
+
+=== Environments
+
+Restack models integration branches as **environments** with:
+
+* **name** -- human label (e.g., `dev`, `staging`)
+* **branch** -- the git branch it maps to
+* **ordinal** -- rebuild order (lower = rebuilt first)
+* **auto_promote** -- whether CI-passed topics are automatically promoted
+
+=== Topic Lifecycle
+
+----
+create topic --> promote to dev --> graduate to staging --> graduate to main
+                     |                    |
+                     v                    v
+              early feedback        UAT testing
+----
+
+WARNING: Never commit directly to `dev` or `staging` -- these branches are rebuilt from topics. Direct commits will be lost.
+
+== Tasks
+
+=== Initial Setup
+
+==== Initialize a Workspace
+
+Create the restack workspace in your repository root:
+
+ $ restack init
+
+This creates `.restack/` with a config file and SQLite database, registers the current repo, and discovers existing
+topic branches.
+
+==== Create Integration Branches
+
+Set up integration environments atomically -- creates git branches and registers them in the database:
+
+ $ restack env init
+
+This reads the default environments from `.restack/config.toml` (typically `dev` and `staging`), creates any missing
+git branches from `main`, and registers them as environments.
+
+The command is **idempotent** -- running it again skips existing branches and environments.
+
+===== Options
+
+ $ restack env init --push
+
+Creates branches and pushes them to the remote.
+
+ $ restack env init --interactive
+
+Launches an interactive wizard to select branches from local and remote:
+
+----
+? Select integration branches:
+  [ ] main
+  [x] dev
+  [x] staging
+  [ ] feature/foo (remote)
+
+? Environment name for 'dev': dev
+? Sort ordinal (lower = rebuilt first): 1
+? Auto-promote topics? Yes
+
+? Environment name for 'staging': staging
+? Sort ordinal (lower = rebuilt first): 0
+? Auto-promote topics? No
+
+? Create these environments? Yes
+----
+
+===== Verification
+
+ $ restack env list
+
+Shows all registered environments with their branches, ordinals, and auto-promote settings.
+
+=== Developers
+
+==== Creating and Developing a Topic
+
+Topics are created by branching from `main`.
+
+*Question*: Is this topic going to be merged to the current release?
+
+* If *yes*, branch from `main`
+* If *no*, create a hotfix branch from `maint`
+
+Brush up on these commands:
+
+* git https://git-scm.com/docs/git-checkout[checkout] -b
+* git https://git-scm.com/docs/git-commit[commit]
+* git https://git-scm.com/docs/git-rebase[rebase] -i
+* git https://git-scm.com/docs/git-push[push]
+
+===== Examples
+
+Create a new topic branch from `main`:
+
+ (main) $ git checkout -b tr/add-auth
+
+ Switched to a new branch 'tr/add-auth'
+
+ (tr/add-auth) $
+
+Develop your topic, committing as you go. Write good commit messages. Use `git rebase -i` to make an easily
+reviewable series of commits.
+
+Push your branch for review:
+
+ (tr/add-auth) $ git push --set-upstream origin tr/add-auth
+
+Track the topic in restack:
+
+ $ restack topic track tr/add-auth
+
+==== Depending on Another Topic
+
+If your work depends on another topic not yet merged to `main`, merge that topic into yours.
+Do *not* base your work on `dev` or `staging`.
+
+===== Example
+
+Branch `tr/my-feature` depends on `tr/add-auth`:
+
+ (tr/my-feature) $ git merge --no-ff tr/add-auth
+
+This explicitly records the dependency and puts conflict resolutions on the right branch.
+
+=== Release Managers
+
+==== Promoting a Topic to Dev (Early Integration)
+
+A topic is promoted to `dev` for early feedback and conflict detection. The topic may be raw and cause regressions.
+
+===== Using Restack
+
+ $ restack promote to tr/add-auth dev --repo <repo_id>
+
+===== Using Git Directly
+
+ $ git checkout dev
+ (dev) $ git merge --no-ff tr/add-auth
+
+===== Notes
+
+* Topics on `dev` can still be interactively rebased
+* `dev` can always be rewound to `main` and rebuilt
+* If pushing `dev` conflicts with a concurrent push, fetch + reset-hard + re-merge (do not merge-pull)
+
+==== Graduating a Topic to Staging (UAT)
+
+A topic graduates to `staging` once code review is complete and initial testing on `dev` is done. The topic may still
+need stabilization.
+
+===== Using Restack
+
+ $ restack promote to tr/add-auth staging --repo <repo_id>
+
+===== Using Git Directly
+
+ $ git checkout staging
+ (staging) $ git merge --no-ff tr/add-auth
+
+===== Notes
+
+* From this point, generally do not rebase the topic -- only push new fixup commits
+* The topic stays on `staging` as long as needed to stabilize
+
+==== Graduating a Topic to Main (Release)
+
+A topic merges to `main` when it is stable on `staging`.
+
+===== Using Git Directly
+
+ $ git checkout main
+ (main) $ git merge --no-ff tr/add-auth
+
+Not every merge to `main` needs to form a release. `main` represents the latest stable code.
+
+==== Rebuilding Integration Branches
+
+Integration branches (`dev`, `staging`) are **ephemeral** -- they can be rewound to `main` and rebuilt from topic
+merges at any time. This is typically done after a release.
+
+===== Using Restack
+
+Rebuild a single environment:
+
+ $ restack rebuild env <env_id>
+
+Rebuild all environments for a repo:
+
+ $ restack rebuild all <repo_id>
+
+Rebuild all environments across all repos:
+
+ $ restack rebuild all --all-repos
+
+===== Using Git Directly
+
+ $ git checkout dev
+ (dev) $ git reset --hard main
+ (dev) $ git merge --no-ff tr/topic-a
+ (dev) $ git merge --no-ff tr/topic-b
+
+===== Watch Mode
+
+Restack can auto-rebuild on a schedule:
+
+ $ restack rebuild watch --interval 60
+
+This polls for CI-passed topics, auto-promotes them, and rebuilds affected environments.
+
+===== Notes
+
+* Enable `git rerere` to remember conflict resolutions across rebuilds
+* Restack handles conflict detection automatically -- conflicting topics are skipped and flagged
+* Use `restack conflicts list` to see which topics conflict
+
+==== Creating a Release
+
+Verify `maint` contains no commits missing from `main`:
+
+ $ git log main..maint
+
+If any commits appear, merge maint into main first:
+
+ $ git checkout main
+ (main) $ git merge maint
+
+Tag the release:
+
+ $ git checkout main
+ (main) $ git tag -a "v2.0.0" -m "v2.0.0"
+
+Update the maintenance branch:
+
+ $ git checkout maint
+ (maint) $ git merge --ff-only main
+ (maint) $ git push origin maint
+
+After a release, rebuild `dev` and `staging` from the new `main`:
+
+ $ restack rebuild all <repo_id>
+
+== Configuration
+
+The workspace config lives at `.restack/config.toml`:
+
+[source,toml]
+----
+[workspace]
+name = "my-project"
+
+[defaults]
+base_branch = "main"
+provider = "github"
+
+[environments.staging]
+branch = "staging"
+ordinal = 0
+auto_promote = false
+
+[environments.dev]
+branch = "dev"
+ordinal = 1
+auto_promote = true
+
+[rebuild]
+force_push = "lease"
+marker_commits = true
+
+[discovery]
+exclude_patterns = ["main", "master", "staging", "dev", "maint", "maint-*", "release-*"]
+exclude_env_branches = true
+----
+
+=== Key Settings
+
+[cols="1,3"]
+|===
+| Setting | Description
+
+| `defaults.base_branch`
+| Branch that topics are created from and integration branches are rebuilt from.
+
+| `environments.<name>.ordinal`
+| Controls rebuild order. Lower ordinals are rebuilt first (e.g., staging before dev ensures
+  staging-only topics are merged before dev topics).
+
+| `environments.<name>.auto_promote`
+| When `true`, topics with passing CI are automatically promoted to this environment during
+  `restack rebuild watch`.
+
+| `rebuild.force_push`
+| Push strategy after rebuild: `lease` (safe, checks remote state), `force` (overwrite), or `off`.
+
+| `rebuild.marker_commits`
+| When `true`, adds an empty commit marking the start of each rebuild for auditability.
+|===
+
+== Quick Reference
+
+[cols="1,3"]
+|===
+| Task | Command
+
+| Initialize workspace
+| `restack init`
+
+| Create integration branches
+| `restack env init`
+
+| Create integration branches (interactive)
+| `restack env init --interactive`
+
+| List environments
+| `restack env list`
+
+| Track a topic
+| `restack topic track <branch>`
+
+| List topics
+| `restack topic list`
+
+| Promote topic to env
+| `restack promote to <topic> <env> --repo <id>`
+
+| Demote topic from env
+| `restack promote from <topic> <env> --repo <id>`
+
+| Rebuild an environment
+| `restack rebuild env <env_id>`
+
+| Rebuild all environments
+| `restack rebuild all <repo_id>`
+
+| Auto-rebuild loop
+| `restack rebuild watch --interval 60`
+
+| List conflicts
+| `restack conflicts list`
+
+| Refresh (fetch + discover + sync CI)
+| `restack refresh`
+
+| Show env status
+| `restack env status <env_id>`
+|===

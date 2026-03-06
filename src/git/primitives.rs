@@ -83,6 +83,11 @@ pub fn branch_create(repo: &Path, name: &str, from_ref: &str) -> GitResult<()> {
     Ok(())
 }
 
+pub fn branch_create_at(repo: &Path, name: &str, from_ref: &str) -> GitResult<()> {
+    run_git(repo, &["branch", name, from_ref])?;
+    Ok(())
+}
+
 pub fn branch_delete(repo: &Path, name: &str, remote: bool) -> GitResult<()> {
     if remote {
         run_git(repo, &["push", "--delete", "origin", name])?;

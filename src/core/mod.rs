@@ -1,5 +1,6 @@
 pub mod ci_service;
 pub mod discovery_service;
+pub mod env_init_service;
 pub mod env_service;
 pub mod hotfix_service;
 pub mod pipeline_service;

@@ -72,6 +72,12 @@ pub enum RestackError {
 
     #[error("Repo already tracked: {0}")]
     RepoAlreadyTracked(String),
+
+    #[error("No repos tracked. Run `restack init` first.")]
+    NoRepos,
+
+    #[error("Multiple repos tracked. Specify --repo <id>.")]
+    MultipleRepos,
 }
 
 pub type Result<T> = std::result::Result<T, RestackError>;
