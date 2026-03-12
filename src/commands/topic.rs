@@ -17,33 +17,33 @@ pub enum TopicCommand {
     Track {
         /// Branch name
         branch: String,
-        /// Repo ID
+        /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
-        repo: String,
+        repo: Option<String>,
     },
     /// Untrack a topic
     Untrack {
         /// Topic ID or branch name
         id: String,
-        /// Repo ID
+        /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
-        repo: String,
+        repo: Option<String>,
     },
     /// Archive a topic (hide from board, mark as closed)
     Archive {
         /// Topic ID or branch name
         id: String,
-        /// Repo ID
+        /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
-        repo: String,
+        repo: Option<String>,
     },
     /// Close a topic: delete branch on origin + local, then remove from DB
     Close {
         /// Topic ID or branch name
         id: String,
-        /// Repo ID
+        /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
-        repo: String,
+        repo: Option<String>,
     },
     /// List tracked topics
     List {
@@ -58,9 +58,9 @@ pub enum TopicCommand {
     Status {
         /// Topic ID or branch name
         id: String,
-        /// Repo ID
+        /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
-        repo: String,
+        repo: Option<String>,
     },
     /// List topic-environment assignments
     Envs,
@@ -77,26 +77,19 @@ struct MultiRepoTopics {
 pub fn handle(conn: &Connection, cmd: &TopicCommand, workspace_root: &Path) -> Result<String> {
     match cmd {
         TopicCommand::Track { branch, repo } => {
-            let repo_id: RepoId = repo
-                .parse()
-                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
-            let topic = topic_service::track_topic(conn, &repo_id, branch)?;
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
+            let topic = topic_service::track_topic(conn, &repo.id, branch)?;
             Ok(serde_json::to_string_pretty(&topic)?)
         }
         TopicCommand::Untrack { id, repo } => {
-            let repo_id: RepoId = repo
-                .parse()
-                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
-            topic_service::untrack_topic(conn, id, &repo_id)?;
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
+            topic_service::untrack_topic(conn, id, &repo.id)?;
             Ok(serde_json::json!({ "deleted": true }).to_string())
         }
         TopicCommand::Close { id, repo } => {
-            let repo_id: RepoId = repo
-                .parse()
-                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
-            let repo_row = repo_repo::get_repo(conn, &repo_id)?;
-            let repo_path = std::path::Path::new(&repo_row.path);
-            let topic = crate::db::topic_repo::get_topic_by_branch(conn, &repo_id, id)?
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
+            let repo_path = std::path::Path::new(&repo.path);
+            let topic = crate::db::topic_repo::get_topic_by_branch(conn, &repo.id, id)?
                 .or_else(|| {
                     id.parse()
                         .ok()
@@ -118,10 +111,8 @@ pub fn handle(conn: &Connection, cmd: &TopicCommand, workspace_root: &Path) -> R
             Ok(serde_json::json!({ "deleted": true, "branch": topic.branch }).to_string())
         }
         TopicCommand::Archive { id, repo } => {
-            let repo_id: RepoId = repo
-                .parse()
-                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
-            let topic = crate::db::topic_repo::get_topic_by_branch(conn, &repo_id, id)?
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
+            let topic = crate::db::topic_repo::get_topic_by_branch(conn, &repo.id, id)?
                 .or_else(|| {
                     id.parse()
                         .ok()
@@ -143,10 +134,7 @@ pub fn handle(conn: &Connection, cmd: &TopicCommand, workspace_root: &Path) -> R
             };
 
             let repos_to_discover = if let Some(r) = repo {
-                let repo_id: RepoId = r
-                    .parse()
-                    .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
-                vec![repo_repo::get_repo(conn, &repo_id)?]
+                vec![repo_service::resolve_repo(conn, Some(r), workspace_root)?]
             } else {
                 repo_repo::list_repos(conn).unwrap_or_default()
             };
@@ -171,18 +159,19 @@ pub fn handle(conn: &Connection, cmd: &TopicCommand, workspace_root: &Path) -> R
             } else {
                 let repo_id = repo
                     .as_ref()
-                    .map(|r| r.parse::<RepoId>())
-                    .transpose()
-                    .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
+                    .map(|r| {
+                        Ok::<_, crate::error::RestackError>(
+                            repo_service::resolve_repo(conn, Some(r), workspace_root)?.id,
+                        )
+                    })
+                    .transpose()?;
                 let topics = topic_service::list_topics(conn, repo_id.as_ref())?;
                 Ok(serde_json::to_string_pretty(&topics)?)
             }
         }
         TopicCommand::Status { id, repo } => {
-            let repo_id: RepoId = repo
-                .parse()
-                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
-            let status = topic_service::get_topic_status(conn, id, &repo_id)?;
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
+            let status = topic_service::get_topic_status(conn, id, &repo.id)?;
             Ok(serde_json::to_string_pretty(&status)?)
         }
         TopicCommand::Envs => {

@@ -17,6 +17,7 @@ import type {
   Rebuild,
   Conflict,
   TopicStatus,
+  BranchOrigin,
   CiStatus,
   RebuildStatus,
 } from "../../generated/types.js";
@@ -51,6 +52,12 @@ const CI_BADGE_COLORS: Record<CiStatus, string> = {
   pending: "bg-status-ci-pending/20 text-status-ci-pending",
   passed: "bg-status-ci-passed/20 text-status-ci-passed",
   failed: "bg-status-ci-failed/20 text-status-ci-failed",
+};
+
+const ORIGIN_BADGE_COLORS: Record<BranchOrigin, string> = {
+  tracked: "bg-status-active/20 text-status-active",
+  "local-only": "bg-surface-secondary text-text-muted",
+  orphaned: "bg-status-conflict/20 text-status-conflict",
 };
 
 const REBUILD_COLORS: Record<RebuildStatus, string> = {
@@ -611,6 +618,13 @@ function TopicCard({
                 className={`px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${STATUS_BADGE_COLORS[topic.status]}`}
               >
                 {topic.status}
+              </span>
+            )}
+            {topic.branchOrigin !== "tracked" && (
+              <span
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono uppercase ${ORIGIN_BADGE_COLORS[topic.branchOrigin]}`}
+              >
+                {topic.branchOrigin === "local-only" ? "local" : "orphaned"}
               </span>
             )}
             {topic.ciStatus &&

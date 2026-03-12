@@ -98,6 +98,8 @@ export type Provider = "gitHub" | "azureDevOps" | "bitbucket" | "unknown";
 
 export type TopicStatus = "active" | "conflict" | "graduated" | "closed";
 
+export type BranchOrigin = "tracked" | "local-only" | "orphaned";
+
 export type CiStatus = "pending" | "passed" | "failed";
 
 export type RebuildStatus = "running" | "success" | "partial" | "failed";
@@ -134,6 +136,7 @@ export interface Topic {
   prId: string | null;
   prUrl: string | null;
   status: TopicStatus;
+  branchOrigin: BranchOrigin;
   ciStatus: CiStatus | null;
   ciUrl: string | null;
   lastCiCheck: string | null; // ISO 8601

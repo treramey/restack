@@ -18,6 +18,9 @@ pub enum RebuildCommand {
     Env {
         /// Environment ID
         env: String,
+        /// Repo ID or name (auto-detected if not specified)
+        #[arg(long)]
+        repo: Option<String>,
         /// Show what would happen without making changes
         #[arg(long)]
         dry_run: bool,
@@ -63,15 +66,21 @@ pub fn handle(conn: &Connection, cmd: &RebuildCommand, repo_path: &Path) -> Resu
         }
         RebuildCommand::Env {
             env,
+            repo,
             dry_run,
             interactive,
         } => {
             let env_id: EnvId = env
                 .parse()
                 .map_err(|_| crate::error::RestackError::InvalidId(env.clone()))?;
-            // Look up env and repo from DB to get the correct repo path
+            // Look up env to get the correct repo path
             let env_rec = env_repo::get_env(conn, &env_id)?;
-            let repo = repo_repo::get_repo(conn, &env_rec.repo_id)?;
+            // Use resolve_repo if --repo provided, otherwise derive from env
+            let repo = if let Some(repo_arg) = repo {
+                repo_service::resolve_repo(conn, Some(repo_arg), repo_path)?
+            } else {
+                repo_repo::get_repo(conn, &env_rec.repo_id)?
+            };
             let repo_path = PathBuf::from(&repo.path);
             let rebuild =
                 rebuild_service::rebuild_env(conn, &env_id, &repo_path, *dry_run, *interactive)?;
@@ -100,15 +109,10 @@ pub fn handle(conn: &Connection, cmd: &RebuildCommand, repo_path: &Path) -> Resu
 
                 Ok(serde_json::to_string_pretty(&results)?)
             } else {
-                let repo_str = repo.as_deref().ok_or_else(|| {
-                    crate::error::RestackError::InvalidId("(none provided)".to_string())
-                })?;
-                let repo_id: RepoId = repo_str
-                    .parse()
-                    .map_err(|_| crate::error::RestackError::InvalidId(repo_str.to_string()))?;
+                let repo = repo_service::resolve_repo(conn, repo.as_deref(), repo_path)?;
                 let rebuilds = rebuild_service::rebuild_all(
                     conn,
-                    &repo_id,
+                    &repo.id,
                     repo_path,
                     *dry_run,
                     *interactive,

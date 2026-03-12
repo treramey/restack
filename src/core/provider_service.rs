@@ -5,7 +5,7 @@ use crate::db::{repo_repo, topic_repo};
 use crate::error::Result;
 use crate::id::TopicId;
 use crate::provider::{self, PrState};
-use crate::types::{CiStatus, Conflict, Repo, TopicStatus};
+use crate::types::{BranchOrigin, CiStatus, Conflict, Repo, TopicStatus};
 
 // ---------------------------------------------------------------------------
 // Return types
@@ -55,6 +55,7 @@ pub fn sync_topics_from_prs(conn: &Connection, repo: &Repo) -> Result<SyncResult
                     conn,
                     &repo.id,
                     &pr.head_branch,
+                    BranchOrigin::Tracked,
                     Some(&pr.number),
                     Some(&pr.url),
                 )?;

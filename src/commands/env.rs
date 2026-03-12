@@ -19,9 +19,9 @@ pub enum EnvCommand {
         /// Branch name for this environment
         #[arg(long)]
         branch: String,
-        /// Repo ID
+        /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
-        repo: String,
+        repo: Option<String>,
         /// Sort ordinal (lower = rebuilt first)
         #[arg(long, default_value = "0")]
         ordinal: i32,
@@ -98,10 +98,8 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
             ordinal,
             auto_promote,
         } => {
-            let repo_id: RepoId = repo
-                .parse()
-                .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
-            let env = env_service::add_env(conn, &repo_id, name, branch, *ordinal, *auto_promote)?;
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
+            let env = env_service::add_env(conn, &repo.id, name, branch, *ordinal, *auto_promote)?;
             Ok(serde_json::to_string_pretty(&env)?)
         }
         EnvCommand::List { repo, all_repos } => {
@@ -118,12 +116,8 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
                 }
                 Ok(serde_json::to_string_pretty(&results)?)
             } else {
-                let repo_id = repo
-                    .as_ref()
-                    .map(|r| r.parse::<RepoId>())
-                    .transpose()
-                    .map_err(|_| crate::error::RestackError::RepoNotFound(RepoId::new()))?;
-                let envs = env_service::list_envs(conn, repo_id.as_ref())?;
+                let repo = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
+                let envs = env_service::list_envs(conn, Some(&repo.id))?;
                 Ok(serde_json::to_string_pretty(&envs)?)
             }
         }
@@ -135,7 +129,7 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
             Ok(serde_json::to_string_pretty(&status)?)
         }
         EnvCommand::CiOverride { env_name, repo } => {
-            let repo_obj = env_init_service::resolve_repo(conn, repo.as_deref())?;
+            let repo_obj = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
             let env = match env_repo::get_env_by_name(conn, &repo_obj.id, env_name)? {
                 Some(e) => e,
                 None => {
@@ -165,7 +159,7 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
             }))?)
         }
         EnvCommand::Blame { env_name, repo } => {
-            let repo_obj = env_init_service::resolve_repo(conn, repo.as_deref())?;
+            let repo_obj = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
             let env = match env_repo::get_env_by_name(conn, &repo_obj.id, env_name)? {
                 Some(e) => e,
                 None => {
@@ -174,11 +168,13 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
                     ))
                 }
             };
-            let result = crate::core::speculative_ci_service::speculative_blame_or_fallback(conn, &env.id, &repo_obj)?;
+            let result = crate::core::speculative_ci_service::speculative_blame_or_fallback(
+                conn, &env.id, &repo_obj,
+            )?;
             Ok(serde_json::to_string_pretty(&result)?)
         }
         EnvCommand::SpeculativeStatus { env_name, repo } => {
-            let repo_obj = env_init_service::resolve_repo(conn, repo.as_deref())?;
+            let repo_obj = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
             let env = match env_repo::get_env_by_name(conn, &repo_obj.id, env_name)? {
                 Some(e) => e,
                 None => {
@@ -187,25 +183,29 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
                     ))
                 }
             };
-            let result = crate::core::speculative_ci_service::check_speculative_ci(conn, &env.id, &repo_obj)?;
+            let result = crate::core::speculative_ci_service::check_speculative_ci(
+                conn, &env.id, &repo_obj,
+            )?;
             Ok(serde_json::to_string_pretty(&result)?)
         }
         EnvCommand::Init {
             repo,
             interactive,
             push,
-        } => handle_init(conn, cwd, repo.as_deref(), *interactive, *push),
+        } => {
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
+            handle_init(conn, cwd, &repo, *interactive, *push)
+        }
     }
 }
 
 fn handle_init(
     conn: &Connection,
     cwd: &Path,
-    repo_arg: Option<&str>,
+    repo: &crate::types::Repo,
     interactive: bool,
     push: bool,
 ) -> Result<String> {
-    let repo = env_init_service::resolve_repo(conn, repo_arg)?;
     let repo_path = std::path::PathBuf::from(&repo.path);
 
     let config_path = cwd.join(".restack").join("config.toml");
@@ -243,9 +243,7 @@ fn handle_init(
     Ok(serde_json::to_string_pretty(&result)?)
 }
 
-fn prompt_interactive_envs(
-    repo_path: &Path,
-) -> Result<Vec<env_init_service::EnvInitInput>> {
+fn prompt_interactive_envs(repo_path: &Path) -> Result<Vec<env_init_service::EnvInitInput>> {
     use dialoguer::{Confirm, Input, MultiSelect};
 
     let all_branches = crate::git::list_all_branches(repo_path)?;

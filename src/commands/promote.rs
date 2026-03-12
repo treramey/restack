@@ -4,8 +4,8 @@ use clap::Subcommand;
 use rusqlite::Connection;
 
 use crate::core::promote_service;
+use crate::core::repo_service;
 use crate::error::Result;
-use crate::id::RepoId;
 
 #[derive(Subcommand)]
 pub enum PromoteCommand {
@@ -15,9 +15,9 @@ pub enum PromoteCommand {
         topic: String,
         /// Target environment name
         env: String,
-        /// Repo ID
+        /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
-        repo: String,
+        repo: Option<String>,
         /// Show what would happen without making changes
         #[arg(long)]
         dry_run: bool,
@@ -30,9 +30,9 @@ pub enum PromoteCommand {
         topic: String,
         /// Environment name to remove from
         env: String,
-        /// Repo ID
+        /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
-        repo: String,
+        repo: Option<String>,
         /// Show what would happen without making changes
         #[arg(long)]
         dry_run: bool,
@@ -51,11 +51,9 @@ pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Resu
             repo,
             dry_run,
         } => {
-            let repo_id: RepoId = repo
-                .parse()
-                .map_err(|_| crate::error::RestackError::InvalidId(repo.clone()))?;
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), repo_path)?;
             let result =
-                promote_service::promote_to(conn, topic, env, &repo_id, repo_path, *dry_run)?;
+                promote_service::promote_to(conn, topic, env, &repo.id, repo_path, *dry_run)?;
             Ok(serde_json::to_string_pretty(&result)?)
         }
         PromoteCommand::From {
@@ -64,11 +62,9 @@ pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Resu
             repo,
             dry_run,
         } => {
-            let repo_id: RepoId = repo
-                .parse()
-                .map_err(|_| crate::error::RestackError::InvalidId(repo.clone()))?;
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), repo_path)?;
             let result =
-                promote_service::demote_from(conn, topic, env, &repo_id, repo_path, *dry_run)?;
+                promote_service::demote_from(conn, topic, env, &repo.id, repo_path, *dry_run)?;
             Ok(serde_json::to_string_pretty(&result)?)
         }
     }

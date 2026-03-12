@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::{topic_env_repo, topic_repo};
 use crate::error::{RestackError, Result};
 use crate::id::RepoId;
-use crate::types::{Environment, Topic};
+use crate::types::{BranchOrigin, Environment, Topic};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,7 +21,7 @@ pub fn track_topic(conn: &Connection, repo_id: &RepoId, branch: &str) -> Result<
         });
     }
 
-    topic_repo::create_topic(conn, repo_id, branch, None, None)
+    topic_repo::create_topic(conn, repo_id, branch, BranchOrigin::LocalOnly, None, None)
 }
 
 pub fn untrack_topic(conn: &Connection, id_or_branch: &str, repo_id: &RepoId) -> Result<()> {

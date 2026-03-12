@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::config;
-use crate::core::{discovery_service, repo_service};
+use crate::core::repo_service;
 use crate::db;
 use crate::error::Result;
 
@@ -10,7 +10,7 @@ pub fn handle_init(path: &Path) -> Result<String> {
     std::fs::create_dir_all(&restack_dir)?;
 
     let config_path = restack_dir.join("config.toml");
-    let cfg = if config_path.exists() {
+    let _cfg = if config_path.exists() {
         config::load_config(&config_path)?
     } else {
         let cfg = config::default_config();
@@ -27,17 +27,19 @@ pub fn handle_init(path: &Path) -> Result<String> {
     });
 
     if is_git_repo(path) {
-        match repo_service::add_repo(&conn, path, &path.display().to_string(), None) {
-            Ok(repo) => {
-                result["repo"] = serde_json::to_value(&repo)?;
-
-                match discovery_service::discover_topics(&conn, &repo.id, path, &cfg) {
-                    Ok(discovery) => {
-                        result["discovery"] = serde_json::to_value(&discovery)?;
-                    }
-                    Err(e) => {
-                        result["discovery_error"] = e.to_string().into();
-                    }
+        match repo_service::add_repo(&conn, path, &path.display().to_string(), None, true) {
+            Ok(repo_result) => {
+                if let Some(repo) = repo_result.get("repo") {
+                    result["repo"] = repo.clone();
+                }
+                if let Some(discovery) = repo_result.get("discovery") {
+                    result["discovery"] = discovery.clone();
+                }
+                if let Some(err) = repo_result.get("discovery_error") {
+                    result["discovery_error"] = err.clone();
+                }
+                if let Some(hint) = repo_result.get("hint") {
+                    result["hint"] = hint.clone();
                 }
             }
             Err(e) => {

@@ -56,6 +56,12 @@ const CI_COLORS: Record<string, string> = {
   failed: "bg-status-ci-failed/20 text-status-ci-failed border-status-ci-failed/40",
 };
 
+const ORIGIN_COLORS: Record<Topic["branchOrigin"], string> = {
+  tracked: "bg-status-active/20 text-status-active border-status-active/40",
+  "local-only": "bg-surface-secondary text-text-muted border-border/40",
+  orphaned: "bg-status-conflict/20 text-status-conflict border-status-conflict/40",
+};
+
 function Badge({ label, colorClass }: { label: string; colorClass: string }) {
   return (
     <span className={`px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${colorClass}`}>
@@ -242,8 +248,14 @@ export function ListView() {
               </span>
 
               {/* Branch */}
-              <span className="flex-1 min-w-[180px] text-sm font-mono text-text-primary truncate">
-                {row.topic.branch}
+              <span className="flex-1 min-w-[180px] text-sm font-mono text-text-primary truncate flex items-center gap-2">
+                <span className="truncate">{row.topic.branch}</span>
+                {row.topic.branchOrigin !== "tracked" && (
+                  <Badge
+                    label={row.topic.branchOrigin === "local-only" ? "local" : "orphaned"}
+                    colorClass={ORIGIN_COLORS[row.topic.branchOrigin]}
+                  />
+                )}
               </span>
 
               {/* Status */}

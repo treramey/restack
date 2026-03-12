@@ -3,7 +3,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 use crate::id::{EnvId, TopicId};
-use crate::types::{Topic, TopicEnvironment};
+use crate::types::{BranchOrigin, Topic, TopicEnvironment};
 
 pub fn add_topic_to_env(
     conn: &Connection,
@@ -42,7 +42,7 @@ pub fn remove_topic_from_all_envs(conn: &Connection, topic_id: &TopicId) -> Resu
 
 pub fn get_topics_in_env(conn: &Connection, env_id: &EnvId) -> Result<Vec<Topic>> {
     let mut stmt = conn.prepare(
-        r#"SELECT t.id, t.repo_id, t.branch, t.pr_id, t.pr_url, t.status, t.ci_status, t.created_at
+        r#"SELECT t.id, t.repo_id, t.branch, t.pr_id, t.pr_url, t.status, t.branch_origin, t.ci_status, t.created_at
            FROM topics t
            JOIN topic_environments te ON t.id = te.topic_id
            WHERE te.env_id = ?1
@@ -57,8 +57,9 @@ pub fn get_topics_in_env(conn: &Connection, env_id: &EnvId) -> Result<Vec<Topic>
             pr_id: row.get(3)?,
             pr_url: row.get(4)?,
             status: row.get::<_, String>(5)?,
-            ci_status: row.get::<_, Option<String>>(6)?,
-            created_at: row.get::<_, String>(7)?,
+            branch_origin: row.get::<_, String>(6)?,
+            ci_status: row.get::<_, Option<String>>(7)?,
+            created_at: row.get::<_, String>(8)?,
         })
     })?;
 
@@ -122,6 +123,7 @@ struct TopicRow {
     pr_id: Option<String>,
     pr_url: Option<String>,
     status: String,
+    branch_origin: String,
     ci_status: Option<String>,
     created_at: String,
 }
@@ -142,6 +144,12 @@ impl TopicRow {
             "failed" => CiStatus::Failed,
             _ => CiStatus::Pending,
         });
+        let branch_origin = match self.branch_origin.as_str() {
+            "tracked" => BranchOrigin::Tracked,
+            "local-only" => BranchOrigin::LocalOnly,
+            "orphaned" => BranchOrigin::Orphaned,
+            _ => BranchOrigin::Tracked,
+        };
         let created_at = chrono::DateTime::parse_from_rfc3339(&self.created_at)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -153,6 +161,7 @@ impl TopicRow {
             pr_id: self.pr_id,
             pr_url: self.pr_url,
             status,
+            branch_origin,
             ci_status,
             ci_url: None,
             last_ci_check: None,

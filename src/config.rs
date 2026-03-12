@@ -168,7 +168,7 @@ pub struct AzureConfig {
 impl Default for ProviderSection {
     fn default() -> Self {
         Self {
-            auto_ci_refresh: true,
+            auto_ci_refresh: false,
             conflict_notifications: false,
             github: GitHubConfig::default(),
             azure: AzureConfig::default(),
@@ -178,10 +178,24 @@ impl Default for ProviderSection {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiscoverySection {
+    #[serde(default = "default_discovery_mode")]
+    pub mode: DiscoveryMode,
     #[serde(default = "default_exclude_patterns")]
     pub exclude_patterns: Vec<String>,
     #[serde(default = "default_true")]
     pub exclude_env_branches: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DiscoveryMode {
+    OriginOnly,
+    LocalOnly,
+    All,
+}
+
+fn default_discovery_mode() -> DiscoveryMode {
+    DiscoveryMode::OriginOnly
 }
 
 fn default_exclude_patterns() -> Vec<String> {
@@ -204,6 +218,7 @@ fn default_exclude_patterns() -> Vec<String> {
 impl Default for DiscoverySection {
     fn default() -> Self {
         Self {
+            mode: default_discovery_mode(),
             exclude_patterns: default_exclude_patterns(),
             exclude_env_branches: true,
         }

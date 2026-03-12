@@ -35,6 +35,14 @@ pub enum TopicStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BranchOrigin {
+    Tracked,
+    LocalOnly,
+    Orphaned,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CiStatus {
     Pending,
@@ -112,6 +120,7 @@ pub struct Topic {
     pub pr_id: Option<String>,
     pub pr_url: Option<String>,
     pub status: TopicStatus,
+    pub branch_origin: BranchOrigin,
     pub ci_status: Option<CiStatus>,
     pub ci_url: Option<String>,
     pub last_ci_check: Option<DateTime<Utc>>,

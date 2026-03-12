@@ -42,6 +42,14 @@ pub struct MergeLogEntry {
     pub subject: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchPresence {
+    pub branch: String,
+    pub has_local: bool,
+    pub has_remote: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -157,6 +165,40 @@ pub fn list_all_branches(repo: &Path) -> GitResult<Vec<(String, bool)>> {
     }
 
     Ok(result)
+}
+
+pub fn list_branch_presence(repo: &Path) -> GitResult<Vec<BranchPresence>> {
+    let local = list_local_branches(repo)?;
+    let remote = list_remote_branches(repo)?;
+
+    let mut merged: std::collections::BTreeMap<String, BranchPresence> =
+        std::collections::BTreeMap::new();
+
+    for branch in local {
+        let key = branch.clone();
+        merged
+            .entry(key)
+            .and_modify(|entry| entry.has_local = true)
+            .or_insert(BranchPresence {
+                branch,
+                has_local: true,
+                has_remote: false,
+            });
+    }
+
+    for branch in remote {
+        let key = branch.clone();
+        merged
+            .entry(key)
+            .and_modify(|entry| entry.has_remote = true)
+            .or_insert(BranchPresence {
+                branch,
+                has_local: false,
+                has_remote: true,
+            });
+    }
+
+    Ok(merged.into_values().collect())
 }
 
 // ---------------------------------------------------------------------------

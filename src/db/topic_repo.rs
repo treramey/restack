@@ -3,21 +3,28 @@ use rusqlite::Connection;
 
 use crate::error::{RestackError, Result};
 use crate::id::{RepoId, TopicId};
-use crate::types::{CiStatus, Topic, TopicStatus};
+use crate::types::{BranchOrigin, CiStatus, Topic, TopicStatus};
 
 pub fn create_topic(
     conn: &Connection,
     repo_id: &RepoId,
     branch: &str,
+    branch_origin: BranchOrigin,
     pr_id: Option<&str>,
     pr_url: Option<&str>,
 ) -> Result<Topic> {
     let id = TopicId::new();
     let now = Utc::now();
 
+    let origin_str = match branch_origin {
+        BranchOrigin::Tracked => "tracked",
+        BranchOrigin::LocalOnly => "local-only",
+        BranchOrigin::Orphaned => "orphaned",
+    };
+
     conn.execute(
-        "INSERT INTO topics (id, repo_id, branch, pr_id, pr_url, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![id, repo_id, branch, pr_id, pr_url, "active", now.to_rfc3339()],
+        "INSERT INTO topics (id, repo_id, branch, pr_id, pr_url, status, branch_origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![id, repo_id, branch, pr_id, pr_url, "active", origin_str, now.to_rfc3339()],
     )?;
 
     Ok(Topic {
@@ -27,6 +34,7 @@ pub fn create_topic(
         pr_id: pr_id.map(|s| s.to_string()),
         pr_url: pr_url.map(|s| s.to_string()),
         status: TopicStatus::Active,
+        branch_origin,
         ci_status: None,
         ci_url: None,
         last_ci_check: None,
@@ -36,7 +44,7 @@ pub fn create_topic(
 
 pub fn get_topic(conn: &Connection, id: &TopicId) -> Result<Topic> {
     conn.query_row(
-        "SELECT id, repo_id, branch, pr_id, pr_url, status, ci_status, created_at, ci_url, last_ci_check FROM topics WHERE id = ?1",
+        "SELECT id, repo_id, branch, pr_id, pr_url, status, branch_origin, ci_status, created_at, ci_url, last_ci_check FROM topics WHERE id = ?1",
         [id],
         |row| {
             Ok(TopicRow {
@@ -46,10 +54,11 @@ pub fn get_topic(conn: &Connection, id: &TopicId) -> Result<Topic> {
                 pr_id: row.get(3)?,
                 pr_url: row.get(4)?,
                 status: row.get::<_, String>(5)?,
-                ci_status: row.get::<_, Option<String>>(6)?,
-                created_at: row.get::<_, String>(7)?,
-                ci_url: row.get::<_, Option<String>>(8)?,
-                last_ci_check: row.get::<_, Option<String>>(9)?,
+                branch_origin: row.get::<_, String>(6)?,
+                ci_status: row.get::<_, Option<String>>(7)?,
+                created_at: row.get::<_, String>(8)?,
+                ci_url: row.get::<_, Option<String>>(9)?,
+                last_ci_check: row.get::<_, Option<String>>(10)?,
             })
         },
     )
@@ -63,7 +72,7 @@ pub fn get_topic_by_branch(
     branch: &str,
 ) -> Result<Option<Topic>> {
     let mut stmt = conn.prepare(
-        "SELECT id, repo_id, branch, pr_id, pr_url, status, ci_status, created_at, ci_url, last_ci_check FROM topics WHERE repo_id = ?1 AND branch = ?2",
+        "SELECT id, repo_id, branch, pr_id, pr_url, status, branch_origin, ci_status, created_at, ci_url, last_ci_check FROM topics WHERE repo_id = ?1 AND branch = ?2",
     )?;
 
     let mut rows = stmt.query(rusqlite::params![repo_id, branch])?;
@@ -76,10 +85,11 @@ pub fn get_topic_by_branch(
                 pr_id: row.get(3)?,
                 pr_url: row.get(4)?,
                 status: row.get::<_, String>(5)?,
-                ci_status: row.get::<_, Option<String>>(6)?,
-                created_at: row.get::<_, String>(7)?,
-                ci_url: row.get::<_, Option<String>>(8)?,
-                last_ci_check: row.get::<_, Option<String>>(9)?,
+                branch_origin: row.get::<_, String>(6)?,
+                ci_status: row.get::<_, Option<String>>(7)?,
+                created_at: row.get::<_, String>(8)?,
+                ci_url: row.get::<_, Option<String>>(9)?,
+                last_ci_check: row.get::<_, Option<String>>(10)?,
             };
             Ok(Some(r.into_topic()?))
         }
@@ -93,7 +103,7 @@ pub fn list_topics(conn: &Connection, repo_id: Option<&RepoId>) -> Result<Vec<To
     match repo_id {
         Some(rid) => {
             let mut stmt = conn.prepare(
-                "SELECT id, repo_id, branch, pr_id, pr_url, status, ci_status, created_at, ci_url, last_ci_check FROM topics WHERE repo_id = ?1 ORDER BY branch",
+                "SELECT id, repo_id, branch, pr_id, pr_url, status, branch_origin, ci_status, created_at, ci_url, last_ci_check FROM topics WHERE repo_id = ?1 ORDER BY branch",
             )?;
             let rows = stmt.query_map([rid], map_topic_row)?;
             for row in rows {
@@ -102,7 +112,7 @@ pub fn list_topics(conn: &Connection, repo_id: Option<&RepoId>) -> Result<Vec<To
         }
         None => {
             let mut stmt = conn.prepare(
-                "SELECT id, repo_id, branch, pr_id, pr_url, status, ci_status, created_at, ci_url, last_ci_check FROM topics ORDER BY branch",
+                "SELECT id, repo_id, branch, pr_id, pr_url, status, branch_origin, ci_status, created_at, ci_url, last_ci_check FROM topics ORDER BY branch",
             )?;
             let rows = stmt.query_map([], map_topic_row)?;
             for row in rows {
@@ -154,10 +164,11 @@ fn map_topic_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TopicRow> {
         pr_id: row.get(3)?,
         pr_url: row.get(4)?,
         status: row.get::<_, String>(5)?,
-        ci_status: row.get::<_, Option<String>>(6)?,
-        created_at: row.get::<_, String>(7)?,
-        ci_url: row.get::<_, Option<String>>(8)?,
-        last_ci_check: row.get::<_, Option<String>>(9)?,
+        branch_origin: row.get::<_, String>(6)?,
+        ci_status: row.get::<_, Option<String>>(7)?,
+        created_at: row.get::<_, String>(8)?,
+        ci_url: row.get::<_, Option<String>>(9)?,
+        last_ci_check: row.get::<_, Option<String>>(10)?,
     })
 }
 
@@ -168,6 +179,7 @@ struct TopicRow {
     pr_id: Option<String>,
     pr_url: Option<String>,
     status: String,
+    branch_origin: String,
     ci_status: Option<String>,
     created_at: String,
     ci_url: Option<String>,
@@ -189,6 +201,12 @@ impl TopicRow {
             "failed" => CiStatus::Failed,
             _ => CiStatus::Pending,
         });
+        let branch_origin = match self.branch_origin.as_str() {
+            "tracked" => BranchOrigin::Tracked,
+            "local-only" => BranchOrigin::LocalOnly,
+            "orphaned" => BranchOrigin::Orphaned,
+            _ => BranchOrigin::Tracked,
+        };
         let created_at = chrono::DateTime::parse_from_rfc3339(&self.created_at)
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now());
@@ -205,12 +223,31 @@ impl TopicRow {
             pr_id: self.pr_id,
             pr_url: self.pr_url,
             status,
+            branch_origin,
             ci_status,
             ci_url: self.ci_url,
             last_ci_check,
             created_at,
         })
     }
+}
+
+pub fn update_topic_branch_origin(
+    conn: &Connection,
+    id: &TopicId,
+    branch_origin: BranchOrigin,
+) -> Result<()> {
+    let origin_str = match branch_origin {
+        BranchOrigin::Tracked => "tracked",
+        BranchOrigin::LocalOnly => "local-only",
+        BranchOrigin::Orphaned => "orphaned",
+    };
+
+    conn.execute(
+        "UPDATE topics SET branch_origin = ?1 WHERE id = ?2",
+        rusqlite::params![origin_str, id],
+    )?;
+    Ok(())
 }
 
 pub fn update_topic_ci_status(

@@ -5,7 +5,8 @@ use crate::error::Result;
 const SCHEMA_VERSION: i32 = 4;
 
 pub fn init_schema(conn: &Connection) -> Result<()> {
-    let current_version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let mut current_version: i32 =
+        conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
     if current_version == 0 {
         conn.execute_batch(
@@ -37,7 +38,10 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
                 pr_id TEXT,
                 pr_url TEXT,
                 status TEXT NOT NULL DEFAULT 'active',
+                branch_origin TEXT NOT NULL DEFAULT 'tracked',
                 ci_status TEXT,
+                ci_url TEXT,
+                last_ci_check TEXT,
                 created_at TEXT NOT NULL,
                 UNIQUE(repo_id, branch)
             );
@@ -82,15 +86,12 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         )?;
 
         conn.pragma_update(None, "user_version", 1)?;
+        current_version = 1;
     }
 
     if current_version <= 1 {
-        conn.execute_batch(
-            r#"
-            ALTER TABLE topics ADD COLUMN ci_url TEXT;
-            ALTER TABLE topics ADD COLUMN last_ci_check TEXT;
-            "#,
-        )?;
+        // Columns ci_url and last_ci_check are now in initial schema
+        // This migration is kept for backward compatibility with existing dbs
         conn.pragma_update(None, "user_version", 2)?;
     }
 

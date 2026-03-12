@@ -2,12 +2,12 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::config::WorkspaceConfig;
+use crate::config::{DiscoveryMode, WorkspaceConfig};
 use crate::db::{env_repo, topic_repo};
 use crate::error::Result;
 use crate::git;
 use crate::id::RepoId;
-use crate::types::{Topic, TopicStatus};
+use crate::types::{BranchOrigin, Topic, TopicStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,26 +32,50 @@ pub fn discover_topics(
     let envs = env_repo::list_envs(conn, Some(repo_id))?;
     let env_branches: Vec<&str> = envs.iter().map(|e| e.branch.as_str()).collect();
 
-    let all_branches = git::list_all_branches(repo_path)?;
+    let branches = git::list_branch_presence(repo_path)?;
 
     let mut discovered = 0i32;
     let mut created = 0i32;
     let mut skipped = 0i32;
     let mut new_topics = Vec::new();
 
-    for (branch, _is_local) in all_branches {
-        if config.discovery.should_exclude(&branch, &env_branches) {
+    for branch in branches {
+        if !should_track_branch(config.discovery.mode, branch.has_local, branch.has_remote) {
             skipped += 1;
+            continue;
+        }
+
+        if config
+            .discovery
+            .should_exclude(&branch.branch, &env_branches)
+        {
+            skipped += 1;
+            continue;
+        }
+
+        let existing = topic_repo::get_topic_by_branch(conn, repo_id, &branch.branch)?;
+        if let Some(topic) = existing {
+            let next_origin =
+                classify_branch_origin(topic.branch_origin, branch.has_local, branch.has_remote);
+            if next_origin != topic.branch_origin {
+                topic_repo::update_topic_branch_origin(conn, &topic.id, next_origin)?;
+            }
+            discovered += 1;
             continue;
         }
 
         discovered += 1;
 
-        if topic_repo::get_topic_by_branch(conn, repo_id, &branch)?.is_none() {
-            let topic = topic_repo::create_topic(conn, repo_id, &branch, None, None)?;
-            new_topics.push(topic);
-            created += 1;
-        }
+        let topic = topic_repo::create_topic(
+            conn,
+            repo_id,
+            &branch.branch,
+            classify_new_topic_origin(branch.has_local, branch.has_remote),
+            None,
+            None,
+        )?;
+        new_topics.push(topic);
+        created += 1;
     }
 
     let closed = close_deleted_topics(conn, repo_id, repo_path)?;
@@ -65,6 +89,41 @@ pub fn discover_topics(
         skipped,
         topics,
     })
+}
+
+fn should_track_branch(mode: DiscoveryMode, has_local: bool, has_remote: bool) -> bool {
+    match mode {
+        DiscoveryMode::OriginOnly => has_remote,
+        DiscoveryMode::LocalOnly => has_local && !has_remote,
+        DiscoveryMode::All => has_local || has_remote,
+    }
+}
+
+fn classify_new_topic_origin(has_local: bool, has_remote: bool) -> BranchOrigin {
+    if has_remote {
+        BranchOrigin::Tracked
+    } else if has_local {
+        BranchOrigin::LocalOnly
+    } else {
+        BranchOrigin::Tracked
+    }
+}
+
+fn classify_branch_origin(
+    previous: BranchOrigin,
+    has_local: bool,
+    has_remote: bool,
+) -> BranchOrigin {
+    if has_remote {
+        BranchOrigin::Tracked
+    } else if has_local {
+        match previous {
+            BranchOrigin::Tracked | BranchOrigin::Orphaned => BranchOrigin::Orphaned,
+            BranchOrigin::LocalOnly => BranchOrigin::LocalOnly,
+        }
+    } else {
+        previous
+    }
 }
 
 fn close_deleted_topics(conn: &Connection, repo_id: &RepoId, repo_path: &Path) -> Result<i32> {

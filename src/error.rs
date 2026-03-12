@@ -78,6 +78,45 @@ pub enum RestackError {
 
     #[error("Multiple repos tracked. Specify --repo <id>.")]
     MultipleRepos,
+
+    #[error("Not in a tracked repository. Run from within a repo or specify --repo <name>")]
+    NotInTrackedRepo,
+
+    #[error("Multiple repos match name '{name}': {matches}")]
+    AmbiguousRepoName { name: String, matches: String },
+
+    #[error("Repository not found: {0}")]
+    RepoNotFoundByName(String),
 }
 
 pub type Result<T> = std::result::Result<T, RestackError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_not_in_tracked_repo_display() {
+        let err = RestackError::NotInTrackedRepo;
+        assert!(err.to_string().contains("Not in a tracked repository"));
+    }
+
+    #[test]
+    fn test_error_ambiguous_repo_name_display() {
+        let err = RestackError::AmbiguousRepoName {
+            name: "api".to_string(),
+            matches: "api-server, api-client".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("Multiple repos match name 'api'"));
+        assert!(msg.contains("api-server, api-client"));
+    }
+
+    #[test]
+    fn test_error_repo_not_found_by_name_display() {
+        let err = RestackError::RepoNotFoundByName("unknown-repo".to_string());
+        assert!(err
+            .to_string()
+            .contains("Repository not found: unknown-repo"));
+    }
+}
