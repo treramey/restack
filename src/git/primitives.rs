@@ -537,6 +537,40 @@ pub fn push_tag(repo: &Path, tag: &str) -> GitResult<()> {
     Ok(())
 }
 
+/// Push multiple branch refs to origin in a single command with force-with-lease.
+pub fn push_refs(repo: &Path, branches: &[&str]) -> GitResult<()> {
+    if branches.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["push", "--force-with-lease", "origin"];
+    for branch in branches {
+        args.push(branch);
+    }
+    run_git(repo, &args)?;
+    Ok(())
+}
+
+/// Delete multiple remote branches in a single push command.
+/// Uses the `:refs/heads/branch` refspec to delete.
+pub fn delete_remote_refs(repo: &Path, branches: &[&str]) -> GitResult<()> {
+    if branches.is_empty() {
+        return Ok(());
+    }
+    let refspecs: Vec<String> = branches.iter().map(|b| format!(":refs/heads/{b}")).collect();
+    let refspec_strs: Vec<&str> = refspecs.iter().map(|s| s.as_str()).collect();
+    let mut args = vec!["push", "origin"];
+    args.extend(refspec_strs.iter());
+    run_git(repo, &args)?;
+    Ok(())
+}
+
+/// Create a local branch at a specific commit SHA (no checkout).
+/// Uses `--force` to overwrite if the branch already exists.
+pub fn create_branch_at_sha(repo: &Path, branch: &str, sha: &str) -> GitResult<()> {
+    run_git(repo, &["branch", "--force", branch, sha])?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::id::{ConflictId, EnvId, RebuildId, RepoId, TopicId};
+use crate::id::{ConflictId, EnvId, RebuildId, RepoId, SpeculativeRefId, TopicId};
 use crate::version::BumpType;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +31,7 @@ pub enum TopicStatus {
     Conflict,
     Graduated,
     Closed,
+    CiQuarantined,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +40,24 @@ pub enum CiStatus {
     Pending,
     Passed,
     Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CiStrategy {
+    Full,
+    BuildOnly,
+    None,
+}
+
+impl std::fmt::Display for CiStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Full => write!(f, "full"),
+            Self::BuildOnly => write!(f, "buildOnly"),
+            Self::None => write!(f, "none"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +98,9 @@ pub struct Environment {
     pub branch: String,
     pub ordinal: i32,
     pub auto_promote: bool,
+    pub ci_status: Option<CiStatus>,
+    pub ci_url: Option<String>,
+    pub last_ci_check: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +137,11 @@ pub struct Rebuild {
     pub topics_merged: i32,
     pub topics_conflicted: i32,
     pub result_sha: Option<String>,
+    pub ci_status: Option<CiStatus>,
+    pub ci_url: Option<String>,
+    pub ci_checked_at: Option<DateTime<Utc>>,
+    pub ci_retry_count: i32,
+    pub ci_override: Option<CiStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,6 +152,21 @@ pub struct Conflict {
     pub topic_id: TopicId,
     pub conflicted_with: Option<String>,
     pub resolved: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeculativeRef {
+    pub id: SpeculativeRefId,
+    pub rebuild_id: RebuildId,
+    pub env_id: EnvId,
+    pub step: i32,
+    pub topic_id: TopicId,
+    pub sha: String,
+    pub branch_name: String,
+    pub ci_status: Option<CiStatus>,
+    pub ci_url: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

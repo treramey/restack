@@ -38,6 +38,9 @@ on:
         description: 'Environment to rebuild'
         required: false
         type: string
+concurrency:
+  group: restack-rebuild-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   rebuild:
     runs-on: ubuntu-latest
@@ -62,6 +65,9 @@ on:
     types: [completed]
   workflow_run:
     types: [completed]
+concurrency:
+  group: restack-ci-status-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   update-status:
     runs-on: ubuntu-latest

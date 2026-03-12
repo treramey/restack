@@ -46,6 +46,9 @@ CREATE TABLE environments (
     branch TEXT NOT NULL,               -- git branch name
     ordinal INTEGER NOT NULL,           -- 0=dev, 1=staging, 2=production
     auto_promote BOOLEAN DEFAULT false,
+    ci_status TEXT,                     -- 'pending' | 'passed' | 'failed'
+    ci_url TEXT,
+    last_ci_check TEXT,
     UNIQUE(repo_id, name)
 );
 
@@ -56,8 +59,10 @@ CREATE TABLE topics (
     branch TEXT NOT NULL,               -- branch name
     pr_id TEXT,                         -- provider PR ID if exists
     pr_url TEXT,
-    status TEXT NOT NULL,               -- 'active' | 'conflict' | 'graduated' | 'closed'
+    status TEXT NOT NULL,               -- 'active' | 'conflict' | 'graduated' | 'closed' | 'ci_quarantined'
     ci_status TEXT,                     -- 'pending' | 'passed' | 'failed'
+    ci_url TEXT,
+    last_ci_check TEXT,
     created_at TEXT NOT NULL,
     UNIQUE(repo_id, branch)
 );
@@ -79,7 +84,36 @@ CREATE TABLE rebuilds (
     status TEXT NOT NULL,               -- 'running' | 'success' | 'partial' | 'failed'
     topics_merged INTEGER,
     topics_conflicted INTEGER,
-    result_sha TEXT
+    result_sha TEXT,
+    ci_status TEXT,                     -- 'pending' | 'passed' | 'failed'
+    ci_url TEXT,
+    ci_checked_at TEXT,
+    ci_retry_count INTEGER DEFAULT 0,
+    ci_override TEXT                    -- manual override of CI status
+);
+
+-- Which topics were in each rebuild (for blame tracking)
+CREATE TABLE rebuild_topics (
+    rebuild_id TEXT NOT NULL,
+    topic_id TEXT NOT NULL,
+    phase INTEGER DEFAULT 0,            -- 0=phase1/single, 1=phase2
+    merge_order INTEGER NOT NULL,       -- order within rebuild
+    PRIMARY KEY (rebuild_id, topic_id)
+);
+
+-- Speculative refs for parallel CI blame detection
+CREATE TABLE speculative_refs (
+    id TEXT PRIMARY KEY,                -- ULID, prefixed "specref_"
+    rebuild_id TEXT NOT NULL,
+    env_id TEXT NOT NULL,
+    step INTEGER NOT NULL,              -- 0-indexed cumulative merge step
+    topic_id TEXT NOT NULL,             -- topic merged at this step
+    sha TEXT NOT NULL,                  -- cumulative commit SHA
+    branch_name TEXT NOT NULL,          -- e.g. "restack/spec/staging/xxx/step-0"
+    ci_status TEXT,
+    ci_url TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE(rebuild_id, step)
 );
 
 -- Conflict log
@@ -195,6 +229,123 @@ Rebuilds are idempotent:
 
 ---
 
+## CI Feedback Loop
+
+Restack provides environment-level CI tracking with automatic blame detection. When a rebuild force-pushes an environment branch, CI runs on the result. Restack monitors CI status and, on failure, identifies the culprit topic.
+
+### Architecture Overview
+
+```
+  rebuild_env()
+       │
+       ├─ Merge topics (object-level, no working tree)
+       ├─ Record rebuild_topics (topic_id, phase, merge_order)
+       ├─ Tree-OID dedup: skip push if tree unchanged from last green build
+       ├─ Force-push env branch → triggers CI
+       ├─ Create speculative refs (step-0, step-1, ...) → triggers parallel CI
+       └─ Set env.ci_status = Pending
+
+  refresh_env_ci_statuses()  (called periodically)
+       │
+       ├─ For each env: check CI via provider adapter
+       ├─ On Passed: update env + rebuild ci_status
+       ├─ On Failed:
+       │    ├─ Retry if ci_retry_count < max_ci_retries
+       │    └─ Else: run blame → quarantine culprit → PR comment
+       └─ Blame strategy:
+            ├─ Speculative (exact): check per-step CI results
+            └─ Differential (fallback): compare green vs red topic sets
+```
+
+### CI Status Flow
+
+```
+Rebuild completes → ci_status = Pending
+                         │
+            ┌────────────┼────────────┐
+            ▼            ▼            ▼
+         Passed       Pending      Failed
+       (promote OK)  (wait)     ┌────┴────┐
+                                ▼         ▼
+                           retry < max?  blame
+                              │           │
+                              ▼           ▼
+                          reset to    quarantine
+                          Pending     culprit topic
+```
+
+### Speculative Parallel Execution
+
+The "endgame" optimization for blame detection. Instead of waiting for the full env CI to fail and then guessing which topic broke it, restack creates **cumulative speculative refs** during rebuild:
+
+```
+base ──→ base+topic1 ──→ base+topic1+topic2 ──→ ... ──→ base+all (env branch)
+              │                   │                              │
+         step-0 ref          step-1 ref                    env branch
+         (push, CI)          (push, CI)                    (push, CI)
+```
+
+Each speculative ref triggers CI in parallel. When CI results arrive:
+- If step-0 passes but step-1 fails → **topic2 is the exact culprit**
+- All steps checked in parallel → **O(1) wall-clock time** for blame
+
+**Branch naming**: `restack/spec/{env_name}/{rebuild_id}/step-{N}`
+
+**Lifecycle**:
+1. Created during `rebuild_env()` after force-push
+2. Pushed in batch via single `git push`
+3. CI checked via `check_speculative_ci()`
+4. Cleaned up at start of next rebuild (old refs deleted from remote + local + DB)
+
+**Fallback**: When no speculative refs exist (e.g., old rebuilds before this feature), the differential blame algorithm is used instead.
+
+### Differential Blame (Fallback)
+
+Compares the topic set of the last green rebuild against the current red rebuild:
+
+```
+Green rebuild topics: {A, B, C}
+Red rebuild topics:   {A, B, C, D, E}
+                                ↑ ↑
+                          New since green → suspects
+```
+
+**Confidence levels**:
+- **High**: Single new topic since green → almost certainly the culprit
+- **Medium**: Multiple new topics since green → one of them
+- **Low**: No green rebuild exists → fallback to last-in heuristic (highest merge_order)
+
+### Tree-OID Deduplication
+
+Before force-pushing, restack compares the rebuilt tree OID against the last successful CI-passed rebuild. If identical (e.g., a topic was promoted then immediately demoted), the push is skipped and CI status is carried forward as `Passed`. This prevents redundant CI runs.
+
+### Quarantine and Retry
+
+1. **Retry-before-blame**: On first CI failure, `ci_retry_count` is incremented and status reset to `Pending`. Only after `max_ci_retries` (default: 1) exhausted does blame run.
+2. **CiQuarantined status**: The blamed topic is set to `CiQuarantined`, preventing it from being auto-promoted to other environments.
+3. **PR notification**: A comment is posted on the culprit topic's PR with confidence level and CI run URL.
+
+### Per-Environment CI Configuration
+
+```toml
+[environments.staging]
+branch = "staging"
+ci_strategy = "full"       # "full" | "buildOnly" | "none"
+ci_pipeline = "build-test" # optional: specific pipeline name
+max_ci_retries = 1         # retries before blame (default: 1)
+auto_demote = false        # auto-remove blamed topics (default: false)
+```
+
+### Auto-Promote Gating
+
+`promote_auto()` skips environments with `ci_status == Failed` or `Pending`. Only environments with `ci_status == None` (permissive default) or `Passed` receive auto-promoted topics. This prevents cascading failures into already-broken environments.
+
+### CI Override
+
+When CI is flaky or a known failure is acceptable, use `restack env ci-override` to clear the CI status. This sets `ci_override` on the rebuild record and resets the environment's `ci_status` to `None`, unblocking auto-promotion.
+
+---
+
 ## State Transitions
 
 ### Topic State Machine
@@ -206,20 +357,24 @@ Rebuilds are idempotent:
              │ add to env
              ▼
         ┌─────────┐
-        │ active  │──┐
-        └────┬────┘  │ conflict in rebuild
-             │       │
-             │       ▼
-             │    ┌─────────┐
-             │    │conflict │
-             │    └────┬────┘
-             │         │ resolve & re-promote
-             │         └──────────┬──────────┘
-             │                    │
-             │ merge to master    ▼
-             │              ┌────────────┐
-             └──────────────│ graduated  │
-                            └────────────┘
+        │ active  │──────────────────┐
+        └────┬────┘                  │
+             │               conflict in rebuild
+             │                       │
+             │       ┌───────────────┤
+             │       │               │
+             │       ▼               ▼
+             │  ┌─────────┐   ┌──────────────┐
+             │  │conflict │   │ci_quarantined│
+             │  └────┬────┘   └──────┬───────┘
+             │       │ resolve        │ fix CI & re-promote
+             │       └───────┬────────┘
+             │               │
+             │ merge to master
+             │               ▼
+             │         ┌────────────┐
+             └─────────│ graduated  │
+                       └────────────┘
 ```
 
 ### Environment Membership
@@ -234,46 +389,39 @@ Merge to master: topic_environments = []                  [graduated]
 
 ---
 
-## Provider Adapters (Future)
+## Provider Adapters
 
-Restack is designed to work with any provider. Core rebuild is pure git. Providers add:
+Restack is designed to work with any provider. Core rebuild is pure git. Providers add CI status polling, PR comments, pipeline triggering, and branch protection.
 
 ### ProviderAdapter Trait
 
 ```rust
-trait ProviderAdapter {
-    // Topic discovery from PRs
-    fn list_prs(&self, filter: PrFilter) -> Result<Vec<PullRequest>>;
-
-    // PR operations
-    fn comment_on_pr(&self, pr_id: &str, body: &str) -> Result<()>;
-    fn update_pr_labels(&self, pr_id: &str, labels: Vec<String>) -> Result<()>;
-
-    // Branch protection
-    fn get_branch_rules(&self, branch: &str) -> Result<Vec<BranchRule>>;
-    fn set_branch_rules(&self, branch: &str, rules: Vec<BranchRule>) -> Result<()>;
-
-    // CI operations
-    fn get_pipeline_status(&self, run_id: &str) -> Result<PipelineStatus>;
-
-    // Notifications
-    fn notify_conflict(&self, topic: &str, conflict_info: ConflictInfo) -> Result<()>;
+trait ProviderAdapter: Send + Sync {
+    fn provider(&self) -> Provider;
+    fn list_prs(&self, state: PrState) -> Result<Vec<PullRequest>>;
+    fn get_ci_status(&self, branch_or_sha: &str) -> Result<CiStatusDetail>;
+    fn comment_on_pr(&self, pr_number: &str, body: &str) -> Result<()>;
+    fn is_available(&self) -> bool;
+    fn create_pr(&self, params: &CreatePrParams) -> Result<PullRequest>;
+    fn merge_pr(&self, params: &MergePrParams) -> Result<MergePrResult>;
+    fn set_branch_protection(&self, params: &BranchProtectionParams) -> Result<BranchProtectionResult>;
+    fn trigger_pipeline(&self, params: &TriggerPipelineParams) -> Result<PipelineRunResult>;
 }
 ```
 
-### Current Scope (MVP)
+### Supported Providers
 
-Pure git operations only:
-- Topic tracking (manual `restack topic track`)
-- Environment promotion (`restack promote`)
-- Rebuild algorithm
-- State management
+- **GitHub**: `gh` CLI for PR listing, CI status, comments, branch protection
+- **Azure DevOps**: `az repos` / `az pipelines` CLI for full lifecycle
+- **Bitbucket**: REST API for PR and pipeline operations
+- **NullAdapter**: Fallback when provider is unknown or unconfigured
 
-### Future Providers
+### CI Integration
 
-- **GitHub**: `gh` CLI wrapper for PR listing, comments, labels
-- **Azure DevOps**: `az repos` CLI + REST API
-- **Bitbucket**: REST API (no CLI available)
+The `get_ci_status(branch_or_sha)` method works for both topic branches and environment branches. It returns `CiStatusDetail` with:
+- Overall status (`Pending` / `Passed` / `Failed`)
+- Individual check runs with names, statuses, conclusions, and URLs
+- Commit SHA for staleness detection
 
 ---
 
@@ -319,24 +467,32 @@ environments = ["dev", "staging"]
 auto_promote_on_ci_pass = false
 force_push_mode = "lease"  # "lease" | "never" | "force"
 
-[environments.dev]
-branch = "dev"
-ordinal = 0
-auto_promote = false
-
 [environments.staging]
 branch = "staging"
-ordinal = 1
+ordinal = 0
 auto_promote = false
+ci_strategy = "full"         # "full" | "buildOnly" | "none"
+ci_pipeline = "build-test"   # optional: target specific pipeline
+max_ci_retries = 1           # retries before blame (default: 1)
+auto_demote = false          # auto-remove blamed topics
+
+[environments.dev]
+branch = "dev"
+ordinal = 1
+auto_promote = true
+ci_strategy = "none"
+
+[provider]
+auto_ci_refresh = true       # refresh CI on restack refresh
+conflict_notifications = false
 
 [provider.github]
-cli = "gh"
-auth_method = "cli"
+repo_slug = "owner/repo"    # optional: explicit repo slug
 
 [rebuild]
-max_topics = 50
-rerere = true
-conflict_strategy = "skip_and_notify"
+force_push = "lease"         # "lease" | "never" | "force"
+marker_commits = true
+rebuild_debounce_secs = 0    # skip rebuild if last completed within N seconds
 
 [release]
 versioning = "conventional"
@@ -499,3 +655,6 @@ fn add_topic_to_env(topic_id: &str, env_id: &str) -> Result<()> {
 - **Workspace federation**: Link multiple workspaces (e.g., frontend + backend)
 - **Metrics**: Track rebuild times, conflict rates, topic lifetime
 - **Auto-cleanup**: Delete graduated topic branches
+- **Speculative ref rate limiting**: Guard against CI provider rate limits for large topic sets
+- **Speculative ref TTL**: Garbage-collect orphaned speculative branches
+- **Binary bisection**: For extremely large topic sets, use binary search instead of linear speculative refs

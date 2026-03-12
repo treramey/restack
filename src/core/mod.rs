@@ -1,4 +1,7 @@
+pub mod blame_service;
+pub mod speculative_ci_service;
 pub mod ci_service;
+pub mod env_ci_service;
 pub mod discovery_service;
 pub mod env_init_service;
 pub mod env_service;

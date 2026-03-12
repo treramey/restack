@@ -4,7 +4,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{provider_service, rebuild_service};
-use crate::db::{conflict_repo, env_repo, repo_repo, topic_env_repo, topic_repo};
+use crate::db::{conflict_repo, env_repo, rebuild_repo, repo_repo, topic_env_repo, topic_repo};
 use crate::error::{RestackError, Result};
 use crate::id::RepoId;
 use crate::types::{CiStatus, Conflict, Environment, Rebuild, Topic, TopicStatus};
@@ -37,6 +37,32 @@ pub fn promote_to(
     if !dry_run {
         // Add topic to environment
         topic_env_repo::add_topic_to_env(conn, &topic.id, &env.id)?;
+
+        // Debounce: skip rebuild if last one completed within the configured window
+        // TODO: load debounce_secs from config when available in this context
+        let debounce_secs = 0u32;
+        let should_skip = debounce_secs > 0 && {
+            if let Ok(Some(last)) = rebuild_repo::get_last_rebuild(conn, &env.id) {
+                if let Some(completed) = last.completed_at {
+                    let elapsed = chrono::Utc::now() - completed;
+                    elapsed.num_seconds() < debounce_secs as i64
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        };
+
+        if should_skip {
+            return Ok(PromoteResult {
+                topic,
+                env,
+                rebuild: None,
+                conflicts: Vec::new(),
+                dry_run,
+            });
+        }
 
         // Trigger rebuild
         let rebuild = rebuild_service::rebuild_env(conn, &env.id, this_repo_path, false, false)?;
@@ -174,6 +200,12 @@ pub fn promote_auto(conn: &Connection) -> Result<AutoPromoteResult> {
             let current_envs = topic_env_repo::get_envs_for_topic(conn, &topic.id)?;
 
             for env in &auto_envs {
+                // Gate: skip envs with failed or pending CI
+                match env.ci_status {
+                    Some(CiStatus::Failed) | Some(CiStatus::Pending) => continue,
+                    _ => {} // None or Passed — allow promotion
+                }
+
                 if current_envs.contains(&env.id) {
                     continue;
                 }
@@ -195,6 +227,19 @@ pub fn promote_auto(conn: &Connection) -> Result<AutoPromoteResult> {
 
         // Rebuild each changed env exactly once and backfill the rebuild into promoted entries
         for env_id in &envs_needing_rebuild {
+            // Debounce: skip rebuild if last one completed within the configured window
+            // TODO: load debounce_secs from config when available in this context
+            let debounce_secs = 0u32;
+            if debounce_secs > 0 {
+                if let Ok(Some(last)) = rebuild_repo::get_last_rebuild(conn, env_id) {
+                    if let Some(completed) = last.completed_at {
+                        let elapsed = chrono::Utc::now() - completed;
+                        if elapsed.num_seconds() < debounce_secs as i64 {
+                            continue;
+                        }
+                    }
+                }
+            }
             let rebuild = rebuild_service::rebuild_env(conn, env_id, this_repo_path, false, false)?;
             let conflicts = conflict_repo::list_conflicts(conn, &rebuild.id)?;
             for pr in promoted.iter_mut() {

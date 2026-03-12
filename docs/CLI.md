@@ -51,7 +51,9 @@ restack refresh [--repo REPO_ID]
 1. `git fetch origin` for all repos
 2. Discover new branches (respecting exclusion patterns)
 3. Archive topics whose branches no longer exist
-4. Sync CI status from provider (if configured)
+4. Sync topic CI status from provider (if configured)
+5. Sync environment CI status (checks env branch CI, runs blame on failure)
+6. Auto-promote CI-passed topics to `auto_promote` environments (gated by env CI status)
 
 ## Repository Management
 
@@ -188,6 +190,88 @@ restack env status <ENV_ID>
 
 **Arguments:**
 - `ENV_ID` (required): Environment ID
+
+### `restack env init`
+
+Initialize integration environments from config or interactively.
+
+```bash
+restack env init [--repo REPO_ID] [--interactive] [--push]
+```
+
+**Arguments:**
+- `--repo`: Repo ID (auto-resolved if single repo in workspace)
+- `-i, --interactive`: Select branches from local/remote interactively
+- `--push`: Push newly created branches to remote
+
+**Example:**
+```bash
+# From config (reads .restack/config.toml [environments] section)
+restack env init
+
+# Interactive mode: pick branches, set names/ordinals
+restack env init --interactive --push
+```
+
+### `restack env ci-override`
+
+Override CI status for an environment. Clears a failed/pending CI state to unblock auto-promotion.
+
+```bash
+restack env ci-override <ENV_NAME> [--repo REPO_ID]
+```
+
+**Arguments:**
+- `ENV_NAME` (required): Environment name
+- `--repo`: Repo ID (auto-resolved if single repo in workspace)
+
+**Effect:** Sets `ci_override = passed` on the latest rebuild, resets the environment's `ci_status` to `None`. Auto-promotion resumes immediately.
+
+### `restack env blame`
+
+Identify the topic most likely responsible for a CI failure on an environment.
+
+```bash
+restack env blame <ENV_NAME> [--repo REPO_ID]
+```
+
+**Arguments:**
+- `ENV_NAME` (required): Environment name
+- `--repo`: Repo ID (auto-resolved if single repo in workspace)
+
+**Output:** JSON with blame result. Uses speculative blame (exact, from per-step CI) when available, falls back to differential blame (comparing green vs red rebuild topic sets).
+
+**Example output:**
+```json
+{
+  "speculative": {
+    "envId": "env_...",
+    "envName": "staging",
+    "rebuildId": "rebuild_...",
+    "breakpointStep": 3,
+    "culpritTopicId": "topic_...",
+    "culpritBranch": "feature/auth",
+    "stepsChecked": 5,
+    "stepsPassed": 3,
+    "stepsFailed": 2,
+    "stepsPending": 0
+  }
+}
+```
+
+### `restack env speculative-status`
+
+Show speculative CI status for each merge step of the latest rebuild.
+
+```bash
+restack env speculative-status <ENV_NAME> [--repo REPO_ID]
+```
+
+**Arguments:**
+- `ENV_NAME` (required): Environment name
+- `--repo`: Repo ID (auto-resolved if single repo in workspace)
+
+**Output:** JSON with per-step CI statuses. Each step represents a cumulative merge (base + topics 0..N). A transition from `passed` to `failed` between steps identifies the exact culprit.
 
 ## Promotion
 

@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 4;
 
 pub fn init_schema(conn: &Connection) -> Result<()> {
     let current_version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -89,6 +89,58 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             r#"
             ALTER TABLE topics ADD COLUMN ci_url TEXT;
             ALTER TABLE topics ADD COLUMN last_ci_check TEXT;
+            "#,
+        )?;
+        conn.pragma_update(None, "user_version", 2)?;
+    }
+
+    if current_version <= 2 {
+        conn.execute_batch(
+            r#"
+            ALTER TABLE environments ADD COLUMN ci_status TEXT;
+            ALTER TABLE environments ADD COLUMN ci_url TEXT;
+            ALTER TABLE environments ADD COLUMN last_ci_check TEXT;
+
+            ALTER TABLE rebuilds ADD COLUMN ci_status TEXT;
+            ALTER TABLE rebuilds ADD COLUMN ci_url TEXT;
+            ALTER TABLE rebuilds ADD COLUMN ci_checked_at TEXT;
+            ALTER TABLE rebuilds ADD COLUMN ci_retry_count INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE rebuilds ADD COLUMN ci_override TEXT;
+
+            CREATE TABLE IF NOT EXISTS rebuild_topics (
+                rebuild_id TEXT NOT NULL REFERENCES rebuilds(id) ON DELETE CASCADE,
+                topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                phase INTEGER NOT NULL DEFAULT 0,
+                merge_order INTEGER NOT NULL,
+                PRIMARY KEY (rebuild_id, topic_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_rebuild_topics_rebuild ON rebuild_topics(rebuild_id);
+            CREATE INDEX IF NOT EXISTS idx_rebuild_topics_topic ON rebuild_topics(topic_id);
+            "#,
+        )?;
+        conn.pragma_update(None, "user_version", 3)?;
+    }
+
+    if current_version <= 3 {
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS speculative_refs (
+                id TEXT PRIMARY KEY CHECK (id LIKE 'specref_%'),
+                rebuild_id TEXT NOT NULL REFERENCES rebuilds(id) ON DELETE CASCADE,
+                env_id TEXT NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+                step INTEGER NOT NULL,
+                topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                sha TEXT NOT NULL,
+                branch_name TEXT NOT NULL,
+                ci_status TEXT,
+                ci_url TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE(rebuild_id, step)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_speculative_refs_rebuild ON speculative_refs(rebuild_id);
+            CREATE INDEX IF NOT EXISTS idx_speculative_refs_env ON speculative_refs(env_id);
             "#,
         )?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

@@ -102,6 +102,7 @@ define_id!(TopicId, "topic_");
 define_id!(EnvId, "env_");
 define_id!(RebuildId, "rebuild_");
 define_id!(ConflictId, "conflict_");
+define_id!(SpeculativeRefId, "specref_");
 
 #[cfg(test)]
 mod tests {

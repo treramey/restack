@@ -39,6 +39,9 @@ pub enum WorkflowOutput {
 pub fn get_ci_status(conn: &Connection, repo: &Repo) -> Result<Vec<TopicCiStatus>> {
     let entries = provider_service::refresh_ci_statuses(conn, repo)?;
 
+    // Also refresh env-level CI statuses
+    let _env_entries = super::env_ci_service::refresh_env_ci_statuses(conn, repo).unwrap_or_default();
+
     Ok(entries
         .into_iter()
         .map(|e| TopicCiStatus {

@@ -5,6 +5,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{env_init_service, env_service, repo_service};
+use crate::db::{env_repo, rebuild_repo};
 use crate::error::Result;
 use crate::id::RepoId;
 use crate::types::Environment;
@@ -41,6 +42,30 @@ pub enum EnvCommand {
     Status {
         /// Environment ID
         id: String,
+    },
+    /// Override CI status for an environment (force-clear a failed/pending state)
+    CiOverride {
+        /// Environment name
+        env_name: String,
+        /// Repo ID (auto-resolved if single repo in workspace)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Blame CI failure: identify the likely culprit topic
+    Blame {
+        /// Environment name
+        env_name: String,
+        /// Repo ID (auto-resolved if single repo in workspace)
+        #[arg(long)]
+        repo: Option<String>,
+    },
+    /// Show speculative CI status for an environment
+    SpeculativeStatus {
+        /// Environment name
+        env_name: String,
+        /// Repo ID (auto-resolved if single repo in workspace)
+        #[arg(long)]
+        repo: Option<String>,
     },
     /// Initialize integration environments (create branches + register)
     Init {
@@ -108,6 +133,62 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
                 .map_err(|_| crate::error::RestackError::EnvNotFound(crate::id::EnvId::new()))?;
             let status = env_service::get_env_status(conn, &env_id)?;
             Ok(serde_json::to_string_pretty(&status)?)
+        }
+        EnvCommand::CiOverride { env_name, repo } => {
+            let repo_obj = env_init_service::resolve_repo(conn, repo.as_deref())?;
+            let env = match env_repo::get_env_by_name(conn, &repo_obj.id, env_name)? {
+                Some(e) => e,
+                None => {
+                    return Err(crate::error::RestackError::EnvNotFound(
+                        env_name.parse().unwrap_or_default(),
+                    ))
+                }
+            };
+            let rebuild = match rebuild_repo::get_last_rebuild(conn, &env.id)? {
+                Some(r) => r,
+                None => {
+                    return Ok(serde_json::to_string_pretty(&serde_json::json!({
+                        "message": "No rebuild found for environment"
+                    }))?)
+                }
+            };
+            conn.execute(
+                "UPDATE rebuilds SET ci_override = 'passed' WHERE id = ?1",
+                rusqlite::params![rebuild.id],
+            )?;
+            env_repo::set_env_ci_status(conn, &env.id, None, None)?;
+            Ok(serde_json::to_string_pretty(&serde_json::json!({
+                "message": "CI override applied",
+                "env_id": env.id,
+                "env_name": env.name,
+                "rebuild_id": rebuild.id,
+            }))?)
+        }
+        EnvCommand::Blame { env_name, repo } => {
+            let repo_obj = env_init_service::resolve_repo(conn, repo.as_deref())?;
+            let env = match env_repo::get_env_by_name(conn, &repo_obj.id, env_name)? {
+                Some(e) => e,
+                None => {
+                    return Err(crate::error::RestackError::EnvNotFound(
+                        env_name.parse().unwrap_or_default(),
+                    ))
+                }
+            };
+            let result = crate::core::speculative_ci_service::speculative_blame_or_fallback(conn, &env.id, &repo_obj)?;
+            Ok(serde_json::to_string_pretty(&result)?)
+        }
+        EnvCommand::SpeculativeStatus { env_name, repo } => {
+            let repo_obj = env_init_service::resolve_repo(conn, repo.as_deref())?;
+            let env = match env_repo::get_env_by_name(conn, &repo_obj.id, env_name)? {
+                Some(e) => e,
+                None => {
+                    return Err(crate::error::RestackError::EnvNotFound(
+                        env_name.parse().unwrap_or_default(),
+                    ))
+                }
+            };
+            let result = crate::core::speculative_ci_service::check_speculative_ci(conn, &env.id, &repo_obj)?;
+            Ok(serde_json::to_string_pretty(&result)?)
         }
         EnvCommand::Init {
             repo,

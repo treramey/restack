@@ -128,6 +128,7 @@ pub fn update_topic_status(conn: &Connection, id: &TopicId, status: TopicStatus)
         TopicStatus::Conflict => "conflict",
         TopicStatus::Graduated => "graduated",
         TopicStatus::Closed => "closed",
+        TopicStatus::CiQuarantined => "ci_quarantined",
     };
     conn.execute(
         "UPDATE topics SET status = ?1 WHERE id = ?2",
@@ -180,6 +181,7 @@ impl TopicRow {
             "conflict" => TopicStatus::Conflict,
             "graduated" => TopicStatus::Graduated,
             "closed" => TopicStatus::Closed,
+            "ci_quarantined" => TopicStatus::CiQuarantined,
             _ => TopicStatus::Active,
         };
         let ci_status = self.ci_status.as_deref().map(|s| match s {

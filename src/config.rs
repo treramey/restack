@@ -4,6 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::types::CiStrategy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
@@ -73,6 +74,22 @@ pub struct EnvConfig {
     pub ordinal: i32,
     #[serde(default)]
     pub auto_promote: bool,
+    #[serde(default = "default_ci_strategy")]
+    pub ci_strategy: CiStrategy,
+    #[serde(default)]
+    pub ci_pipeline: Option<String>,
+    #[serde(default = "default_max_ci_retries")]
+    pub max_ci_retries: u32,
+    #[serde(default)]
+    pub auto_demote: bool,
+}
+
+fn default_ci_strategy() -> CiStrategy {
+    CiStrategy::None
+}
+
+fn default_max_ci_retries() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +98,8 @@ pub struct RebuildSection {
     pub force_push: String,
     #[serde(default = "default_true")]
     pub marker_commits: bool,
+    #[serde(default = "default_debounce_secs")]
+    pub rebuild_debounce_secs: u32,
 }
 
 fn default_force_push_mode() -> String {
@@ -91,11 +110,16 @@ fn default_true() -> bool {
     true
 }
 
+fn default_debounce_secs() -> u32 {
+    0
+}
+
 impl Default for RebuildSection {
     fn default() -> Self {
         Self {
             force_push: default_force_push_mode(),
             marker_commits: true,
+            rebuild_debounce_secs: default_debounce_secs(),
         }
     }
 }
@@ -221,6 +245,10 @@ impl Default for WorkspaceConfig {
                 branch: "staging".to_string(),
                 ordinal: 0,
                 auto_promote: false,
+                ci_strategy: default_ci_strategy(),
+                ci_pipeline: None,
+                max_ci_retries: default_max_ci_retries(),
+                auto_demote: false,
             },
         );
         environments.insert(
@@ -229,6 +257,10 @@ impl Default for WorkspaceConfig {
                 branch: "dev".to_string(),
                 ordinal: 1,
                 auto_promote: true,
+                ci_strategy: default_ci_strategy(),
+                ci_pipeline: None,
+                max_ci_retries: default_max_ci_retries(),
+                auto_demote: false,
             },
         );
 

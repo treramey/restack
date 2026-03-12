@@ -3,11 +3,27 @@ use std::path::Path;
 use dialoguer::Select;
 use rusqlite::Connection;
 
-use crate::db::{conflict_repo, env_repo, rebuild_repo, repo_repo, topic_env_repo};
+use crate::db::{conflict_repo, env_repo, rebuild_repo, rebuild_topic_repo, repo_repo, speculative_ref_repo, topic_env_repo};
 use crate::error::Result;
 use crate::git;
-use crate::id::{EnvId, RepoId};
-use crate::types::{Rebuild, RebuildStatus, Topic, TopicStatus};
+use crate::id::{EnvId, RepoId, TopicId};
+use crate::types::{CiStatus, Rebuild, RebuildStatus, Topic, TopicStatus};
+
+/// Intermediate speculative ref step collected during a rebuild merge loop.
+struct SpecStep {
+    step: i32,
+    topic_id: TopicId,
+    sha: String,
+    branch_name: String,
+}
+
+/// Sanitize a string for use as a git branch name segment.
+fn sanitize_branch_segment(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect::<String>()
+        .to_lowercase()
+}
 
 /// Action chosen by the user during interactive conflict resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,11 +109,22 @@ pub fn rebuild_env(
 
     let repo_path = Path::new(&repo.path);
 
+    // Save previous rebuild ID before creating a new one, for speculative ref cleanup.
+    let prev_rebuild_id = rebuild_repo::get_last_rebuild(conn, env_id)
+        .ok()
+        .flatten()
+        .map(|r| r.id);
+
     let rebuild = rebuild_repo::create_rebuild(conn, env_id)?;
+    let rebuild_id_short = rebuild.id.as_str().strip_prefix("rebuild_").unwrap_or(rebuild.id.as_str()).to_string();
+    let env_name_seg = sanitize_branch_segment(&env.name);
+    let mut spec_steps: Vec<SpecStep> = Vec::new();
 
     let mut merged_count: i32 = 0;
     let mut conflicted_count: i32 = 0;
     let mut aborted = false;
+    let mut merge_order: i32 = 0;
+    let mut current_phase: i32 = 0;
 
     let has_remote = git::has_remote(repo_path);
     if has_remote {
@@ -134,7 +161,13 @@ pub fn rebuild_env(
                 &mut conflicted_count,
                 interactive,
             )? {
-                MergeOutcome::Merged => merged_count += 1,
+                MergeOutcome::Merged => {
+                    rebuild_topic_repo::add_topic_to_rebuild(conn, &rebuild.id, &topic.id, current_phase, merge_order)?;
+                    let branch_name = format!("restack/spec/{env_name_seg}/{rebuild_id_short}/step-{merge_order}");
+                    spec_steps.push(SpecStep { step: merge_order, topic_id: topic.id.clone(), sha: current_sha.clone(), branch_name });
+                    merge_order += 1;
+                    merged_count += 1;
+                }
                 MergeOutcome::Skipped => {}
                 MergeOutcome::Abort => {
                     aborted = true;
@@ -150,6 +183,7 @@ pub fn rebuild_env(
             current_sha = git::commit_tree(repo_path, &tree_oid, &[&current_sha], &marker_msg)?;
 
             // Phase 2: topics ONLY in this env
+            current_phase = 1;
             for topic in &phase2 {
                 match merge_topic_interactive(
                     repo_path,
@@ -160,7 +194,11 @@ pub fn rebuild_env(
                     &mut conflicted_count,
                     interactive,
                 )? {
-                    MergeOutcome::Merged => merged_count += 1,
+                    MergeOutcome::Merged => {
+                        rebuild_topic_repo::add_topic_to_rebuild(conn, &rebuild.id, &topic.id, current_phase, merge_order)?;
+                        merge_order += 1;
+                        merged_count += 1;
+                    }
                     MergeOutcome::Skipped => {}
                     MergeOutcome::Abort => {
                         aborted = true;
@@ -181,7 +219,13 @@ pub fn rebuild_env(
                 &mut conflicted_count,
                 interactive,
             )? {
-                MergeOutcome::Merged => merged_count += 1,
+                MergeOutcome::Merged => {
+                    rebuild_topic_repo::add_topic_to_rebuild(conn, &rebuild.id, &topic.id, current_phase, merge_order)?;
+                    let branch_name = format!("restack/spec/{env_name_seg}/{rebuild_id_short}/step-{merge_order}");
+                    spec_steps.push(SpecStep { step: merge_order, topic_id: topic.id.clone(), sha: current_sha.clone(), branch_name });
+                    merge_order += 1;
+                    merged_count += 1;
+                }
                 MergeOutcome::Skipped => {}
                 MergeOutcome::Abort => {
                     aborted = true;
@@ -191,13 +235,73 @@ pub fn rebuild_env(
         }
     }
 
+    // Tree-OID dedup: skip push if result is identical to last successful rebuild
+    let skip_push = if !dry_run && !aborted {
+        if let Ok(Some(prev)) = rebuild_repo::get_last_rebuild(conn, env_id) {
+            prev.result_sha.as_deref() == Some(current_sha.as_str())
+                && prev.status == RebuildStatus::Success
+                && prev.ci_status == Some(CiStatus::Passed)
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
     // Point env branch at the final commit and push — only when not dry_run and not aborted
-    if !dry_run && !aborted {
+    let final_ci_status = if !dry_run && !aborted && !skip_push {
         git::update_ref(repo_path, &env.branch, &current_sha)?;
         if has_remote {
             git::force_push(repo_path, &env.branch)?;
         }
-    }
+
+        // Cleanup old speculative refs from previous rebuild (best-effort)
+        if let Some(ref prev_id) = prev_rebuild_id {
+            if let Ok(old_refs) = speculative_ref_repo::get_refs_for_rebuild(conn, prev_id) {
+                if !old_refs.is_empty() {
+                    let old_branches: Vec<&str> = old_refs.iter().map(|r| r.branch_name.as_str()).collect();
+                    if has_remote {
+                        let _ = git::delete_remote_refs(repo_path, &old_branches);
+                    }
+                    for branch in &old_branches {
+                        let _ = git::branch_delete(repo_path, branch, false);
+                    }
+                    let _ = speculative_ref_repo::delete_refs_for_rebuild(conn, prev_id);
+                }
+            }
+        }
+
+        // Create local branches and DB records for each speculative ref (best-effort)
+        for step in &spec_steps {
+            if let Err(e) = git::create_branch_at_sha(repo_path, &step.branch_name, &step.sha) {
+                eprintln!("Warning: failed to create speculative branch {}: {e}", step.branch_name);
+            } else {
+                let _ = speculative_ref_repo::create_speculative_ref(
+                    conn, &rebuild.id, &env.id, step.step, &step.topic_id, &step.sha, &step.branch_name,
+                );
+            }
+        }
+
+        // Push all speculative ref branches in one batch (best-effort)
+        if has_remote && !spec_steps.is_empty() {
+            let spec_branches: Vec<&str> = spec_steps.iter().map(|s| s.branch_name.as_str()).collect();
+            if let Err(e) = git::push_refs(repo_path, &spec_branches) {
+                eprintln!("Warning: failed to push speculative refs: {e}");
+            }
+        }
+
+        let _ = rebuild_repo::set_rebuild_ci_status(conn, &rebuild.id, Some(CiStatus::Pending), None);
+        let _ = env_repo::set_env_ci_status(conn, &env.id, Some(CiStatus::Pending), None);
+        Some(CiStatus::Pending)
+    } else if !dry_run && !aborted && skip_push {
+        // Tree unchanged — carry forward passed CI status
+        git::update_ref(repo_path, &env.branch, &current_sha)?;
+        let _ = rebuild_repo::set_rebuild_ci_status(conn, &rebuild.id, Some(CiStatus::Passed), None);
+        let _ = env_repo::set_env_ci_status(conn, &env.id, Some(CiStatus::Passed), None);
+        Some(CiStatus::Passed)
+    } else {
+        None
+    };
 
     let status = if aborted {
         RebuildStatus::Failed
@@ -235,6 +339,11 @@ pub fn rebuild_env(
         topics_merged: merged_count,
         topics_conflicted: conflicted_count,
         result_sha: Some(current_sha),
+        ci_status: final_ci_status,
+        ci_url: None,
+        ci_checked_at: None,
+        ci_retry_count: 0,
+        ci_override: None,
     })
 }
 
