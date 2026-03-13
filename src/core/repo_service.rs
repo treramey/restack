@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config;
 use crate::core::discovery_service;
-use crate::db::{env_repo, repo_repo};
+use crate::db::repo_repo;
 use crate::error::{RestackError, Result};
 use crate::git;
 use crate::id::RepoId;
@@ -42,8 +42,9 @@ pub fn add_repo(
         return Err(RestackError::NotInGitRepo);
     }
 
-    // Detect provider from remote
+    // Detect provider and remote URL
     let provider = git::detect_provider(path).unwrap_or(Provider::Unknown);
+    let remote_url = git::get_remote_url(path);
 
     // Use directory name as default name
     let repo_name = name.map(|n| n.to_string()).unwrap_or_else(|| {
@@ -69,19 +70,51 @@ pub fn add_repo(
         conn,
         &repo_name,
         &canonical_path,
-        None,
+        remote_url.as_deref(),
         provider,
         &base_branch,
     )?;
 
-    // Create default environments
-    env_repo::create_env(conn, &repo.id, "staging", "staging", 0, false)?;
-    env_repo::create_env(conn, &repo.id, "dev", "dev", 1, true)?;
-
-    // Build result JSON
     let mut result = serde_json::json!({
         "repo": repo,
     });
+
+    let restack_yml_path = path.join(".restack.yml");
+    if restack_yml_path.exists() {
+        match crate::config::repo_config::load_repo_config(&restack_yml_path) {
+            Ok(config) => {
+                if let Err(e) = crate::config::repo_config::validate_version(&config) {
+                    result["env_config_error"] = e.to_string().into();
+                } else if let Err(e) =
+                    crate::config::repo_config::validate_no_duplicate_branches(&config)
+                {
+                    result["env_config_error"] = e.to_string().into();
+                } else if let Err(e) =
+                    crate::config::repo_config::validate_production_branch_collision(
+                        &config,
+                        &base_branch,
+                    )
+                {
+                    result["env_config_error"] = e.to_string().into();
+                } else {
+                    let summary = crate::core::env_sync_service::reconcile_environments(
+                        conn, &repo.id, &config,
+                    )?;
+                    result["env_reconcile"] = serde_json::to_value(&summary)?;
+                }
+            }
+            Err(e) => {
+                result["env_config_error"] = e.to_string().into();
+            }
+        }
+    } else {
+        // Generate default .restack.yml and reconcile
+        std::fs::write(&restack_yml_path, crate::config::repo_config::DEFAULT_RESTACK_YML)?;
+        let config = crate::config::repo_config::load_repo_config(&restack_yml_path)?;
+        let summary =
+            crate::core::env_sync_service::reconcile_environments(conn, &repo.id, &config)?;
+        result["env_reconcile"] = serde_json::to_value(&summary)?;
+    }
 
     // Handle discovery if requested
     if discover {
@@ -108,6 +141,7 @@ pub fn add_repo(
 }
 
 pub fn remove_repo(conn: &Connection, id_or_name: &str) -> Result<()> {
+    let id_or_name = id_or_name.trim_end_matches('/');
     // Try as ID first, then by name
     if let Ok(id) = id_or_name.parse() {
         return repo_repo::delete_repo(conn, &id);
@@ -178,9 +212,14 @@ pub fn detect_repos(conn: &Connection, workspace_root: &Path) -> Result<DetectRe
             &base_branch,
         )?;
 
-        // Create default environments
-        env_repo::create_env(conn, &repo.id, "staging", "staging", 0, false)?;
-        env_repo::create_env(conn, &repo.id, "dev", "dev", 1, true)?;
+        // Generate default .restack.yml and reconcile
+        let repo_path = Path::new(&detected.path);
+        let restack_yml_path = repo_path.join(".restack.yml");
+        if !restack_yml_path.exists() {
+            std::fs::write(&restack_yml_path, crate::config::repo_config::DEFAULT_RESTACK_YML)?;
+        }
+        let config = crate::config::repo_config::load_repo_config(&restack_yml_path)?;
+        crate::core::env_sync_service::reconcile_environments(conn, &repo.id, &config)?;
 
         added.push(repo);
     }
@@ -282,6 +321,51 @@ pub fn resolve_repo(conn: &Connection, explicit_repo: Option<&str>, cwd: &Path) 
     match find_repo_from_cwd(conn, cwd)? {
         Some(repo) => Ok(repo),
         None => Err(RestackError::NotInTrackedRepo),
+    }
+}
+
+/// Find a repo that contains a specific branch.
+///
+/// Searches all tracked repos for a repo that has `branch` (locally or remotely).
+/// Returns:
+/// - Ok(repo) if the branch exists in exactly one repo
+/// - Err(BranchNotFoundInAnyRepo) if the branch exists in no repos
+/// - Err(BranchExistsInMultipleRepos) if the branch exists in multiple repos
+pub fn resolve_repo_by_branch(conn: &Connection, branch: &str) -> Result<Repo> {
+    let repos = repo_repo::list_repos(conn)?;
+
+    if repos.is_empty() {
+        return Err(RestackError::NoRepos);
+    }
+
+    // Use list_branch_presence (single git call per repo) instead of
+    // branch_exists_anywhere (2 git calls per repo) to reduce subprocess spawns.
+    let mut matching_repos: Vec<Repo> = Vec::new();
+
+    for repo in repos {
+        let repo_path = std::path::Path::new(&repo.path);
+        match git::list_branch_presence(repo_path) {
+            Ok(branches) => {
+                if branches.iter().any(|b| b.branch == branch) {
+                    matching_repos.push(repo);
+                }
+            }
+            Err(_) => {}
+        }
+    }
+
+    match matching_repos.len() {
+        0 => Err(RestackError::BranchNotFoundInAnyRepo {
+            branch: branch.to_string(),
+        }),
+        1 => Ok(matching_repos.into_iter().next().unwrap()),
+        _ => {
+            let repo_names: Vec<String> = matching_repos.iter().map(|r| r.name.clone()).collect();
+            Err(RestackError::BranchExistsInMultipleRepos {
+                branch: branch.to_string(),
+                repos: repo_names.join(", "),
+            })
+        }
     }
 }
 

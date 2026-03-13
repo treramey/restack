@@ -78,6 +78,40 @@ function topicsInEnv(
   return topics.filter((t) => topicIds.has(t.id));
 }
 
+/** Return the highest-ordinal env each topic belongs to. */
+function highestEnvForTopics(
+  environments: Environment[],
+  topicEnvs: TopicEnvironment[],
+): Map<TopicId, EnvId> {
+  const envOrdinal = new Map(environments.map((e) => [e.id, e.ordinal]));
+  const best = new Map<TopicId, { envId: EnvId; ordinal: number }>();
+
+  for (const te of topicEnvs) {
+    const ord = envOrdinal.get(te.envId);
+    if (ord === undefined) continue;
+    const cur = best.get(te.topicId);
+    if (!cur || ord > cur.ordinal) {
+      best.set(te.topicId, { envId: te.envId, ordinal: ord });
+    }
+  }
+
+  const result = new Map<TopicId, EnvId>();
+  for (const [topicId, { envId }] of best) {
+    result.set(topicId, envId);
+  }
+  return result;
+}
+
+/** Get all env IDs a topic belongs to. */
+function envsForTopic(
+  topicId: TopicId,
+  topicEnvs: TopicEnvironment[],
+): Set<EnvId> {
+  return new Set(
+    topicEnvs.filter((te) => te.topicId === topicId).map((te) => te.envId),
+  );
+}
+
 function latestRebuild(
   envId: EnvId,
   rebuilds: Rebuild[],
@@ -101,9 +135,8 @@ function unassignedTopics(
   const assignedIds = new Set(topicEnvs.map((te) => te.topicId));
   return topics.filter(
     (t) =>
-      !assignedIds.has(t.id) &&
       t.status !== "closed" &&
-      t.status !== "graduated",
+      (!assignedIds.has(t.id) || t.status === "graduated"),
   );
 }
 
@@ -159,14 +192,68 @@ export function KanbanView() {
   const [focusedCard, setFocusedCard] = useState(0);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
-  // Build lane data
+  // Synced scroll for environment lanes (excludes unassigned)
+  const envScrollRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const isSyncingScroll = useRef(false);
+
+  const handleEnvScroll = useCallback((envId: string) => {
+    if (isSyncingScroll.current) return;
+    const source = envScrollRefs.current.get(envId);
+    if (!source) return;
+    isSyncingScroll.current = true;
+    const top = source.scrollTop;
+    for (const [id, el] of envScrollRefs.current) {
+      if (id !== envId && id !== "unassigned") {
+        el.scrollTop = top;
+      }
+    }
+    isSyncingScroll.current = false;
+  }, []);
+
+  const handleEnvScrollRef = useCallback(
+    (envId: string, el: HTMLDivElement | null) => {
+      if (el) {
+        envScrollRefs.current.set(envId, el);
+      } else {
+        envScrollRefs.current.delete(envId);
+      }
+    },
+    [],
+  );
+
+  // Map of topicId -> highest env it belongs to (for dedup)
+  const topicHighestEnv = useMemo(() => {
+    if (!topicEnvs) return new Map<TopicId, EnvId>();
+    return highestEnvForTopics(environments, topicEnvs);
+  }, [environments, topicEnvs]);
+
+  // Env memberships for the selected topic (for ghost cards)
+  const selectedTopicEnvIds = useMemo(() => {
+    if (!selectedTopicId || !topicEnvs) return new Set<EnvId>();
+    return envsForTopic(selectedTopicId, topicEnvs);
+  }, [selectedTopicId, topicEnvs]);
+
+  // The selected topic object (for ghost cards)
+  const selectedTopic = useMemo(() => {
+    if (!selectedTopicId) return undefined;
+    return topics.find((t) => t.id === selectedTopicId);
+  }, [selectedTopicId, topics]);
+
+  // Build lane data — each topic appears only in its highest env
   const lanes = useMemo(() => {
     if (!topicEnvs) return [];
-    const envLanes = environments.map((env) => ({
-      env,
-      topics: topicsInEnv(env.id, topicEnvs, topics),
-      lastRebuild: rebuilds ? latestRebuild(env.id, rebuilds) : undefined,
-    }));
+    const envLanes = environments.map((env) => {
+      const allInEnv = topicsInEnv(env.id, topicEnvs, topics);
+      const deduped = allInEnv.filter(
+        (t) => topicHighestEnv.get(t.id) === env.id,
+      );
+      return {
+        env,
+        topics: deduped,
+        totalInEnv: allInEnv.length,
+        lastRebuild: rebuilds ? latestRebuild(env.id, rebuilds) : undefined,
+      };
+    });
 
     const unassigned = unassignedTopics(topics, topicEnvs);
     if (unassigned.length > 0) {
@@ -181,13 +268,14 @@ export function KanbanView() {
             autoPromote: false,
           },
           topics: unassigned,
+          totalInEnv: unassigned.length,
           lastRebuild: undefined,
         },
         ...envLanes,
       ];
     }
     return envLanes;
-  }, [environments, topics, topicEnvs, rebuilds, selectedRepoId]);
+  }, [environments, topics, topicEnvs, rebuilds, selectedRepoId, topicHighestEnv]);
 
   // Clamp focus when lane contents change
   useEffect(() => {
@@ -346,6 +434,7 @@ export function KanbanView() {
             key={lane.env.id}
             env={lane.env}
             topics={lane.topics}
+            totalInEnv={lane.totalInEnv}
             lastRebuild={lane.lastRebuild}
             conflicts={conflicts ?? []}
             isCurrentLane={laneIndex === focusedLane}
@@ -354,7 +443,17 @@ export function KanbanView() {
             nextEnv={nextEnv(lane.env.id)}
             isMutating={isMutating}
             isLastEnvLane={laneIndex === lanes.length - 1 && lane.env.id !== "unassigned"}
+            ghostTopic={
+              selectedTopic &&
+              lane.env.id !== "unassigned" &&
+              selectedTopicEnvIds.has(lane.env.id) &&
+              topicHighestEnv.get(selectedTopic.id) !== lane.env.id
+                ? selectedTopic
+                : undefined
+            }
             onCardRef={handleCardRef}
+            onScrollRef={handleEnvScrollRef}
+            onScroll={handleEnvScroll}
             onSelect={(topic, cardIndex) => {
               setFocusedLane(laneIndex);
               setFocusedCard(cardIndex);
@@ -394,6 +493,7 @@ export function KanbanView() {
 interface LaneColumnProps {
   env: Environment;
   topics: Topic[];
+  totalInEnv: number;
   lastRebuild: Rebuild | undefined;
   conflicts: Conflict[];
   isCurrentLane: boolean;
@@ -402,7 +502,10 @@ interface LaneColumnProps {
   nextEnv: Environment | undefined;
   isMutating: boolean;
   isLastEnvLane: boolean;
+  ghostTopic: Topic | undefined;
   onCardRef: (id: TopicId, el: HTMLDivElement | null) => void;
+  onScrollRef: (envId: string, el: HTMLDivElement | null) => void;
+  onScroll: (envId: string) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
   onPromote: (topicId: TopicId, repoId: string) => void;
   onDemote: (topicId: TopicId, repoId: string) => void;
@@ -414,6 +517,7 @@ interface LaneColumnProps {
 function LaneColumn({
   env,
   topics,
+  totalInEnv,
   lastRebuild,
   conflicts,
   isCurrentLane,
@@ -422,7 +526,10 @@ function LaneColumn({
   nextEnv,
   isMutating,
   isLastEnvLane,
+  ghostTopic,
   onCardRef,
+  onScrollRef,
+  onScroll,
   onSelect,
   onPromote,
   onDemote,
@@ -455,8 +562,15 @@ function LaneColumn({
                 text-xs font-mono px-2 py-0.5 rounded
                 ${isCurrentLane ? "bg-accent/20 text-accent" : "bg-surface-secondary text-text-dim"}
               `}
+              title={
+                !isUnassigned && topics.length !== totalInEnv
+                  ? `${topics.length} unique here, ${totalInEnv} total including lower envs`
+                  : undefined
+              }
             >
-              {topics.length}
+              {!isUnassigned && topics.length !== totalInEnv
+                ? `${topics.length} / ${totalInEnv}`
+                : totalInEnv}
             </span>
             {!isUnassigned && (
               <button
@@ -488,39 +602,48 @@ function LaneColumn({
 
       {/* Card list */}
       <div className="flex-1 relative min-h-0">
-        <div className="absolute inset-0 overflow-y-auto">
+        <div
+          ref={(el) => onScrollRef(env.id, el)}
+          onScroll={() => onScroll(env.id)}
+          className="absolute inset-0 overflow-y-auto"
+        >
           <div
             className="space-y-2 px-3 pb-3"
             role="list"
             aria-label={`${env.name} topics`}
           >
-            {topics.length === 0 ? (
+            {topics.length === 0 && !ghostTopic ? (
               <div className="text-text-dim text-xs font-mono text-center py-8 opacity-50">
                 No topics
               </div>
             ) : (
-topics.map((topic, cardIndex) => (
-                 <TopicCard
-                   key={topic.id}
-                   topic={topic}
-                   conflicts={conflictsForTopic(topic.id, conflicts)}
-                   cardIndex={cardIndex}
-                   isFocused={
-                     isCurrentLane && focusedCardIndex === cardIndex
-                   }
-                   isSelected={selectedTopicId === topic.id}
-                   nextEnv={nextEnv}
-                   isUnassignedLane={isUnassigned}
-                   isLastEnvLane={isLastEnvLane}
-                   isMutating={isMutating}
-                   onRef={onCardRef}
-                   onSelect={onSelect}
-                   onPromote={onPromote}
-                   onDemote={onDemote}
-                   onGraduate={onGraduate}
-                   onClose={onClose}
-                 />
-               ))
+              <>
+                {ghostTopic && (
+                  <GhostCard branch={ghostTopic.branch} />
+                )}
+                {topics.map((topic, cardIndex) => (
+                  <TopicCard
+                    key={topic.id}
+                    topic={topic}
+                    conflicts={conflictsForTopic(topic.id, conflicts)}
+                    cardIndex={cardIndex}
+                    isFocused={
+                      isCurrentLane && focusedCardIndex === cardIndex
+                    }
+                    isSelected={selectedTopicId === topic.id}
+                    nextEnv={nextEnv}
+                    isUnassignedLane={isUnassigned}
+                    isLastEnvLane={isLastEnvLane}
+                    isMutating={isMutating}
+                    onRef={onCardRef}
+                    onSelect={onSelect}
+                    onPromote={onPromote}
+                    onDemote={onDemote}
+                    onGraduate={onGraduate}
+                    onClose={onClose}
+                  />
+                ))}
+              </>
             )}
           </div>
         </div>
@@ -613,13 +736,19 @@ function TopicCard({
 
           {/* Status badges row */}
           <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-            {topic.status !== "active" && topic.status !== "closed" && (
+            {isGraduated && isUnassignedLane ? (
+              <span
+                className="px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider bg-status-graduated/20 text-status-graduated border-status-graduated/40"
+              >
+                ✓ merged
+              </span>
+            ) : topic.status !== "active" && topic.status !== "closed" ? (
               <span
                 className={`px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${STATUS_BADGE_COLORS[topic.status]}`}
               >
                 {topic.status}
               </span>
-            )}
+            ) : null}
             {topic.branchOrigin !== "tracked" && (
               <span
                 className={`px-1.5 py-0.5 rounded text-[10px] font-mono uppercase ${ORIGIN_BADGE_COLORS[topic.branchOrigin]}`}
@@ -712,6 +841,14 @@ function TopicCard({
                 variant="danger"
               />
             )}
+            {isUnassignedLane && isGraduated && (
+              <ActionButton
+                label="Clean up branch"
+                title="Delete branch (already merged into master)"
+                disabled={isMutating}
+                onClick={() => onClose(topic.id, topic.repoId)}
+              />
+            )}
           </div>
 
           {/* Close confirmation modal */}
@@ -777,6 +914,25 @@ function TopicCard({
             </div>
           )}
         </div>
+    </div>
+  );
+}
+
+// ============ Ghost Card ============
+
+function GhostCard({ branch }: { branch: string }) {
+  return (
+    <div
+      className="p-3 rounded border border-accent/40 bg-accent-subtle/10 border-dashed"
+    >
+      <div className="text-sm font-mono leading-tight truncate text-accent/70">
+        {branch}
+      </div>
+      <div className="flex items-center gap-1.5 mt-1">
+        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase text-accent/50">
+          ✓ present
+        </span>
+      </div>
     </div>
   );
 }

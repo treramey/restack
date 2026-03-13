@@ -116,6 +116,21 @@ pub fn branch_exists(repo: &Path, name: &str) -> GitResult<bool> {
     Ok(output.status.success())
 }
 
+/// Check if a branch exists locally OR remotely in a repo.
+/// Returns true if the branch exists anywhere (refs/heads/ or refs/remotes/origin/).
+pub fn branch_exists_anywhere(repo: &Path, name: &str) -> GitResult<bool> {
+    let local_ref = format!("refs/heads/{name}");
+    let remote_ref = format!("refs/remotes/origin/{name}");
+
+    let local_output = run_git_raw(repo, &["rev-parse", "--verify", &local_ref])?;
+    if local_output.status.success() {
+        return Ok(true);
+    }
+
+    let remote_output = run_git_raw(repo, &["rev-parse", "--verify", &remote_ref])?;
+    Ok(remote_output.status.success())
+}
+
 /// Check if a branch exists on the remote (origin/<name>).
 pub fn remote_branch_exists(repo: &Path, name: &str) -> GitResult<bool> {
     let ref_name = format!("refs/remotes/origin/{name}");
@@ -130,6 +145,31 @@ pub fn list_local_branches(repo: &Path) -> GitResult<Vec<String>> {
         return Ok(Vec::new());
     }
     Ok(output.lines().map(|l| l.trim().to_string()).collect())
+}
+
+/// List all branch names (local + remote, without origin/ prefix) merged into `target_ref`.
+/// Uses a single `git branch -a --merged` call for efficiency.
+pub fn list_branches_merged_into(repo: &Path, target_ref: &str) -> GitResult<Vec<String>> {
+    let output = run_git(
+        repo,
+        &["branch", "-a", "--merged", target_ref, "--format=%(refname:short)"],
+    )?;
+    if output.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::new();
+    for line in output.lines() {
+        let name = line.trim();
+        if name.is_empty() || name.contains("HEAD") {
+            continue;
+        }
+        let stripped = name.strip_prefix("origin/").unwrap_or(name);
+        if seen.insert(stripped.to_string()) {
+            result.push(stripped.to_string());
+        }
+    }
+    Ok(result)
 }
 
 /// List all remote branch names (without the origin/ prefix).
@@ -335,11 +375,15 @@ pub fn commit_empty(repo: &Path, message: &str) -> GitResult<String> {
 // ---------------------------------------------------------------------------
 
 pub fn detect_provider(repo: &Path) -> GitResult<Provider> {
-    let url = match run_git(repo, &["remote", "get-url", "origin"]) {
-        Ok(url) => url,
-        Err(_) => return Ok(Provider::Unknown),
+    let url = match get_remote_url(repo) {
+        Some(url) => url,
+        None => return Ok(Provider::Unknown),
     };
     Ok(parse_provider_url(&url))
+}
+
+pub fn get_remote_url(repo: &Path) -> Option<String> {
+    run_git(repo, &["remote", "get-url", "origin"]).ok()
 }
 
 fn parse_provider_url(url: &str) -> Provider {
@@ -598,7 +642,10 @@ pub fn delete_remote_refs(repo: &Path, branches: &[&str]) -> GitResult<()> {
     if branches.is_empty() {
         return Ok(());
     }
-    let refspecs: Vec<String> = branches.iter().map(|b| format!(":refs/heads/{b}")).collect();
+    let refspecs: Vec<String> = branches
+        .iter()
+        .map(|b| format!(":refs/heads/{b}"))
+        .collect();
     let refspec_strs: Vec<&str> = refspecs.iter().map(|s| s.as_str()).collect();
     let mut args = vec!["push", "origin"];
     args.extend(refspec_strs.iter());
