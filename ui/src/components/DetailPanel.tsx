@@ -11,6 +11,8 @@ import {
   PANEL_HEIGHT_MAX_VH,
 } from "../lib/store.js";
 import { useTopics, useEnvironments, useTopicEnvironments, useRepos, useConflicts } from "../lib/queries.js";
+import { STATUS_BADGE, CI_BADGE } from "../lib/badges.js";
+import type { TopicStatus, CiStatus } from "../generated/types.js";
 
 const COLLAPSED_HEIGHT = 40;
 
@@ -194,58 +196,60 @@ export function DetailPanel() {
           className="flex-1 overflow-hidden border-t border-border"
         >
           {selectedTopic ? (
-            <div className="h-full overflow-y-auto p-4 space-y-4">
+            <dl className="h-full overflow-y-auto p-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Branch</label>
-                  <div className="text-sm font-mono text-text-primary truncate">{selectedTopic.branch}</div>
+                  <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Branch</dt>
+                  <dd className="text-sm font-mono text-text-primary truncate">{selectedTopic.branch}</dd>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Repo</label>
-                  <div className="text-sm font-mono text-text-primary">{selectedRepo?.name ?? "—"}</div>
+                  <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Repo</dt>
+                  <dd className="text-sm font-mono text-text-primary">{selectedRepo?.name ?? "—"}</dd>
                 </div>
                 {selectedTopic.status !== "active" && (
                   <div className="space-y-1">
-                    <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Status</label>
-                    <StatusBadge label={selectedTopic.status} variant={topicStatusVariant(selectedTopic.status)} />
+                    <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Status</dt>
+                    <dd><StatusBadge label={selectedTopic.status} colorClass={STATUS_BADGE[selectedTopic.status as TopicStatus] ?? STATUS_BADGE.closed} /></dd>
                   </div>
                 )}
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Age</label>
-                  <div className="text-sm font-mono text-text-dim">{age}</div>
+                  <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Age</dt>
+                  <dd className="text-sm font-mono text-text-dim">{age}</dd>
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Environment</label>
-                {topicEnvironments.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {topicEnvironments
-                      .sort((a, b) => a.ordinal - b.ordinal)
-                      .map((env) => (
-                        <span
-                          key={env.id}
-                          className="text-xs font-mono px-2 py-1 rounded bg-accent-subtle text-accent border border-accent/40"
-                        >
-                          {env.name}
-                          {env.branch !== env.name && (
-                            <span className="text-text-dim ml-1">({env.branch})</span>
-                          )}
-                        </span>
-                      ))}
-                  </div>
-                ) : (
-                  <div className="text-xs font-mono text-text-dim italic">
-                    Not promoted to any environment
-                  </div>
-                )}
+                <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Environment</dt>
+                <dd>
+                  {topicEnvironments.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {topicEnvironments
+                        .sort((a, b) => a.ordinal - b.ordinal)
+                        .map((env) => (
+                          <span
+                            key={env.id}
+                            className="text-xs font-mono px-2 py-1 rounded bg-accent-subtle text-accent border border-accent/40"
+                          >
+                            {env.name}
+                            {env.branch !== env.name && (
+                              <span className="text-text-dim ml-1">({env.branch})</span>
+                            )}
+                          </span>
+                        ))}
+                    </div>
+                  ) : (
+                    <div className="text-xs font-mono text-text-dim italic">
+                      Not promoted to any environment
+                    </div>
+                  )}
+                </dd>
               </div>
 
               {selectedTopic.ciStatus && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">CI Status</label>
-                  <div className="flex items-center gap-3">
-                    <StatusBadge label={selectedTopic.ciStatus} variant={ciStatusVariant(selectedTopic.ciStatus)} />
+                  <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">CI Status</dt>
+                  <dd className="flex items-center gap-3">
+                    <StatusBadge label={selectedTopic.ciStatus} colorClass={CI_BADGE[selectedTopic.ciStatus as CiStatus] ?? CI_BADGE.pending} />
                     {selectedTopic.ciUrl && (
                       <a
                         href={selectedTopic.ciUrl}
@@ -256,33 +260,35 @@ export function DetailPanel() {
                         View CI →
                       </a>
                     )}
-                  </div>
+                  </dd>
                 </div>
               )}
 
               {selectedTopic.prUrl && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Pull Request</label>
-                  <a
-                    href={selectedTopic.prUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-mono text-accent hover:underline"
-                  >
-                    #{selectedTopic.prId} → {selectedTopic.prUrl.split("/").slice(-2).join("/")}
-                  </a>
+                  <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Pull Request</dt>
+                  <dd>
+                    <a
+                      href={selectedTopic.prUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-mono text-accent hover:underline"
+                    >
+                      #{selectedTopic.prId} → {selectedTopic.prUrl.split("/").slice(-2).join("/")}
+                    </a>
+                  </dd>
                 </div>
               )}
 
               {topicConflicts.length > 0 && (
                 <div className="space-y-1">
-                  <label className="text-[10px] font-mono text-status-conflict uppercase tracking-wider">Conflicts</label>
-                  <div className="text-xs font-mono text-status-conflict">
+                  <dt className="text-[10px] font-mono text-status-conflict uppercase tracking-wider">Conflicts</dt>
+                  <dd className="text-xs font-mono text-status-conflict">
                     {topicConflicts.length} unresolved conflict{topicConflicts.length > 1 ? "s" : ""}
-                  </div>
+                  </dd>
                 </div>
               )}
-            </div>
+            </dl>
           ) : (
             <div className="h-full flex items-center justify-center text-text-muted text-sm font-mono">
               Select a topic to view details
@@ -294,40 +300,9 @@ export function DetailPanel() {
   );
 }
 
-type BadgeVariant = "active" | "conflict" | "graduated" | "closed" | "pending" | "passed" | "failed";
-
-function topicStatusVariant(status: string): BadgeVariant {
-  switch (status) {
-    case "active": return "active";
-    case "conflict": return "conflict";
-    case "graduated": return "graduated";
-    case "closed": return "closed";
-    default: return "closed";
-  }
-}
-
-function ciStatusVariant(status: string): BadgeVariant {
-  switch (status) {
-    case "pending": return "pending";
-    case "passed": return "passed";
-    case "failed": return "failed";
-    default: return "pending";
-  }
-}
-
-const BADGE_COLORS: Record<BadgeVariant, string> = {
-  active: "bg-status-active/20 text-status-active border-status-active/40",
-  conflict: "bg-status-conflict/20 text-status-conflict border-status-conflict/40",
-  graduated: "bg-status-graduated/20 text-status-graduated border-status-graduated/40",
-  closed: "bg-status-closed/20 text-status-closed border-status-closed/40",
-  pending: "bg-status-ci-pending/20 text-status-ci-pending border-status-ci-pending/40",
-  passed: "bg-status-ci-passed/20 text-status-ci-passed border-status-ci-passed/40",
-  failed: "bg-status-ci-failed/20 text-status-ci-failed border-status-ci-failed/40",
-};
-
-function StatusBadge({ label, variant }: { label: string; variant: BadgeVariant }) {
+function StatusBadge({ label, colorClass }: { label: string; colorClass: string }) {
   return (
-    <span className={`px-2 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${BADGE_COLORS[variant]}`}>
+    <span className={`px-2 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${colorClass}`}>
       {label}
     </span>
   );

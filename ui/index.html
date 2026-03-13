@@ -5,8 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>restack</title>
+    <style>
+      /* Pre-CSS fallback — prevents flash of white before Tailwind loads.
+         Values must match --color-bg-primary / --color-text-primary in app.css. */
+      body { background: #191724; color: #e0def4; }
+    </style>
   </head>
-  <body class="bg-[#191724] text-[#e0def4] antialiased">
+  <body class="bg-bg-primary text-text-primary antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

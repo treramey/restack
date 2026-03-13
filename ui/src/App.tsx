@@ -5,14 +5,19 @@
  * - Bottom: Collapsible detail panel
  */
 
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { useUIStore, type ViewMode } from "./lib/store.js";
 import { useWebSocketSync } from "./lib/websocket.js";
 import { Header } from "./components/Header.js";
 import { DetailPanel } from "./components/DetailPanel.js";
 import { KanbanView } from "./components/views/KanbanView.js";
-import { CanvasView, ListView } from "./components/views/index.js";
+import { ListView } from "./components/views/ListView.js";
 import { Toaster } from "sonner";
+
+/** Lazy-loaded: ReactFlow + dagre only downloaded when Canvas view is opened. */
+const CanvasView = lazy(() =>
+  import("./components/views/CanvasView.js").then((m) => ({ default: m.CanvasView })),
+);
 
 export function App() {
   const viewMode = useUIStore((s) => s.viewMode);
@@ -64,8 +69,20 @@ function ViewContainer({ viewMode }: { viewMode: ViewMode }) {
     case "kanban":
       return <KanbanView />;
     case "canvas":
-      return <CanvasView />;
+      return (
+        <Suspense fallback={<ViewLoading />}>
+          <CanvasView />
+        </Suspense>
+      );
     case "list":
       return <ListView />;
   }
+}
+
+function ViewLoading() {
+  return (
+    <div className="flex-1 flex items-center justify-center text-text-muted font-mono text-sm">
+      Loading...
+    </div>
+  );
 }

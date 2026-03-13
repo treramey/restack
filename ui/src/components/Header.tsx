@@ -68,6 +68,7 @@ export function Header() {
         <select
           value={selectedRepoId ?? ""}
           onChange={handleRepoChange}
+          aria-label="Filter by repository"
           className="h-9 px-2 text-[13px] font-mono bg-surface-primary text-text-primary border border-border rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus cursor-pointer"
         >
           <option value="">All repos</option>

@@ -21,6 +21,7 @@ import type {
   TopicId,
   EnvId,
 } from "../../generated/types.js";
+import { STATUS_BADGE, CI_BADGE, ORIGIN_BADGE } from "../../lib/badges.js";
 
 // ── Sort config ──────────────────────────────────────────────────────
 
@@ -40,27 +41,6 @@ interface TopicRow {
   envNames: string[];
   envCount: number;
 }
-
-// ── Status badge helpers ─────────────────────────────────────────────
-
-const STATUS_COLORS: Record<string, string> = {
-  active: "bg-status-active/20 text-status-active border-status-active/40",
-  conflict: "bg-status-conflict/20 text-status-conflict border-status-conflict/40",
-  graduated: "bg-status-graduated/20 text-status-graduated border-status-graduated/40",
-  closed: "bg-status-closed/20 text-status-closed border-status-closed/40",
-};
-
-const CI_COLORS: Record<string, string> = {
-  pending: "bg-status-ci-pending/20 text-status-ci-pending border-status-ci-pending/40",
-  passed: "bg-status-ci-passed/20 text-status-ci-passed border-status-ci-passed/40",
-  failed: "bg-status-ci-failed/20 text-status-ci-failed border-status-ci-failed/40",
-};
-
-const ORIGIN_COLORS: Record<Topic["branchOrigin"], string> = {
-  tracked: "bg-status-active/20 text-status-active border-status-active/40",
-  "local-only": "bg-surface-secondary text-text-muted border-border/40",
-  orphaned: "bg-status-conflict/20 text-status-conflict border-status-conflict/40",
-};
 
 function Badge({ label, colorClass }: { label: string; colorClass: string }) {
   return (
@@ -215,7 +195,7 @@ export function ListView() {
         {columns.map((col) => (
           <button
             key={col.field}
-            className={`${col.className} text-left text-[11px] font-mono uppercase tracking-wider text-text-dim hover:text-text-muted transition-colors cursor-pointer flex items-center`}
+            className={`${col.className} text-left text-[11px] font-mono uppercase tracking-wider text-text-dim hover:text-text-muted transition-colors cursor-pointer flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:rounded`}
             onClick={() => toggleSort(col.field)}
           >
             {col.label}
@@ -253,7 +233,7 @@ export function ListView() {
                 {row.topic.branchOrigin !== "tracked" && (
                   <Badge
                     label={row.topic.branchOrigin === "local-only" ? "local" : "orphaned"}
-                    colorClass={ORIGIN_COLORS[row.topic.branchOrigin]}
+                    colorClass={ORIGIN_BADGE[row.topic.branchOrigin]}
                   />
                 )}
               </span>
@@ -262,7 +242,7 @@ export function ListView() {
               <span className="w-[100px]">
                 <Badge
                   label={row.topic.status}
-                  colorClass={STATUS_COLORS[row.topic.status] ?? STATUS_COLORS["closed"]!}
+                  colorClass={STATUS_BADGE[row.topic.status] ?? STATUS_BADGE["closed"]!}
                 />
               </span>
 
@@ -271,7 +251,7 @@ export function ListView() {
                 {row.topic.ciStatus ? (
                   <Badge
                     label={row.topic.ciStatus}
-                    colorClass={CI_COLORS[row.topic.ciStatus] ?? CI_COLORS["pending"]!}
+                    colorClass={CI_BADGE[row.topic.ciStatus] ?? CI_BADGE["pending"]!}
                   />
                 ) : (
                   <span className="text-[10px] font-mono text-text-dim">--</span>

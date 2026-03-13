@@ -340,10 +340,10 @@ export function CanvasView() {
 
   const handleNodeClick: NodeMouseHandler<CanvasNode> = useCallback(
     (_, node) => {
-      if (node.type === "repo") {
-        setSelectedRepoId((node.data as RepoNodeData).repo.id);
-      } else if (node.type === "topic") {
-        setSelectedTopicId((node.data as TopicNodeData).topic.id);
+      if (node.type === "repo" && "repo" in node.data) {
+        setSelectedRepoId(node.data.repo.id);
+      } else if (node.type === "topic" && "topic" in node.data) {
+        setSelectedTopicId(node.data.topic.id);
       }
     },
     [setSelectedRepoId, setSelectedTopicId],
@@ -369,7 +369,7 @@ export function CanvasView() {
         nodesConnectable={false}
         edgesReconnectable={false}
         elementsSelectable={false}
-        nodesFocusable={false}
+        nodesFocusable={true}
         edgesFocusable={false}
         fitView
         fitViewOptions={{ padding: 0.3, minZoom: 0.2 }}
