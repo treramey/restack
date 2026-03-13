@@ -4,8 +4,8 @@ use clap::Subcommand;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::core::{env_init_service, env_service, repo_service};
-use crate::db::{env_repo, rebuild_repo};
+use crate::core::{env_init_service, env_service, env_sync_service, repo_service};
+use crate::db::{env_repo, rebuild_repo, repo_repo};
 use crate::error::Result;
 use crate::id::RepoId;
 use crate::types::Environment;
@@ -25,9 +25,6 @@ pub enum EnvCommand {
         /// Sort ordinal (lower = rebuilt first)
         #[arg(long, default_value = "0")]
         ordinal: i32,
-        /// Auto-promote topics to this env
-        #[arg(long)]
-        auto_promote: bool,
     },
     /// List environments
     List {
@@ -89,21 +86,36 @@ struct MultiRepoEnvs {
     environments: Vec<Environment>,
 }
 
-pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String> {
+pub fn handle(
+    conn: &Connection,
+    cmd: &EnvCommand,
+    cwd: &Path,
+    no_reconcile: bool,
+) -> Result<String> {
     match cmd {
         EnvCommand::Add {
             name,
             branch,
             repo,
             ordinal,
-            auto_promote,
         } => {
             let repo = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
-            let env = env_service::add_env(conn, &repo.id, name, branch, *ordinal, *auto_promote)?;
+            let env = env_service::add_env(conn, &repo.id, name, branch, *ordinal)?;
             Ok(serde_json::to_string_pretty(&env)?)
         }
         EnvCommand::List { repo, all_repos } => {
             if *all_repos {
+                if !no_reconcile {
+                    let repos = repo_repo::list_repos(conn)?;
+                    for r in &repos {
+                        let repo_path = Path::new(&r.path);
+                        if let Some(summary) =
+                            env_sync_service::maybe_reconcile_repo_envs(conn, &r.id, repo_path)?
+                        {
+                            eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                        }
+                    }
+                }
                 let repos = repo_service::list_repos(conn)?;
                 let mut results = Vec::new();
                 for r in &repos {
@@ -117,6 +129,14 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
                 Ok(serde_json::to_string_pretty(&results)?)
             } else {
                 let repo = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
+                if !no_reconcile {
+                    let repo_path = Path::new(&repo.path);
+                    if let Some(summary) =
+                        env_sync_service::maybe_reconcile_repo_envs(conn, &repo.id, repo_path)?
+                    {
+                        eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                    }
+                }
                 let envs = env_service::list_envs(conn, Some(&repo.id))?;
                 Ok(serde_json::to_string_pretty(&envs)?)
             }
@@ -130,6 +150,14 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
         }
         EnvCommand::CiOverride { env_name, repo } => {
             let repo_obj = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
+            if !no_reconcile {
+                let repo_path = Path::new(&repo_obj.path);
+                if let Some(summary) =
+                    env_sync_service::maybe_reconcile_repo_envs(conn, &repo_obj.id, repo_path)?
+                {
+                    eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                }
+            }
             let env = match env_repo::get_env_by_name(conn, &repo_obj.id, env_name)? {
                 Some(e) => e,
                 None => {
@@ -160,6 +188,14 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
         }
         EnvCommand::Blame { env_name, repo } => {
             let repo_obj = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
+            if !no_reconcile {
+                let repo_path = Path::new(&repo_obj.path);
+                if let Some(summary) =
+                    env_sync_service::maybe_reconcile_repo_envs(conn, &repo_obj.id, repo_path)?
+                {
+                    eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                }
+            }
             let env = match env_repo::get_env_by_name(conn, &repo_obj.id, env_name)? {
                 Some(e) => e,
                 None => {
@@ -175,6 +211,14 @@ pub fn handle(conn: &Connection, cmd: &EnvCommand, cwd: &Path) -> Result<String>
         }
         EnvCommand::SpeculativeStatus { env_name, repo } => {
             let repo_obj = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
+            if !no_reconcile {
+                let repo_path = Path::new(&repo_obj.path);
+                if let Some(summary) =
+                    env_sync_service::maybe_reconcile_repo_envs(conn, &repo_obj.id, repo_path)?
+                {
+                    eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                }
+            }
             let env = match env_repo::get_env_by_name(conn, &repo_obj.id, env_name)? {
                 Some(e) => e,
                 None => {
@@ -288,25 +332,18 @@ fn prompt_interactive_envs(repo_path: &Path) -> Result<Vec<env_init_service::Env
             .interact_text()
             .map_err(|e| std::io::Error::other(e))?;
 
-        let auto_promote = Confirm::new()
-            .with_prompt("Auto-promote topics?")
-            .default(false)
-            .interact()
-            .map_err(|e| std::io::Error::other(e))?;
-
         envs.push(env_init_service::EnvInitInput {
             name,
             branch: branch.clone(),
             ordinal,
-            auto_promote,
         });
     }
 
     eprintln!("\nEnvironments to create:");
     for env in &envs {
         eprintln!(
-            "  {} -> branch '{}' (ordinal: {}, auto-promote: {})",
-            env.name, env.branch, env.ordinal, env.auto_promote
+            "  {} -> branch '{}' (ordinal: {})",
+            env.name, env.branch, env.ordinal
         );
     }
 

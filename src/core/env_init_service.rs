@@ -16,7 +16,6 @@ pub struct EnvInitInput {
     pub name: String,
     pub branch: String,
     pub ordinal: i32,
-    pub auto_promote: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,7 +55,6 @@ pub fn envs_from_config(cfg: &WorkspaceConfig) -> Vec<EnvInitInput> {
             name: name.clone(),
             branch: ec.branch.clone(),
             ordinal: ec.ordinal,
-            auto_promote: ec.auto_promote,
         })
         .collect();
 
@@ -130,7 +128,6 @@ pub fn init_envs(
                     &input.name,
                     &input.branch,
                     input.ordinal,
-                    input.auto_promote,
                 ) {
                     Ok(env) => {
                         result.created_envs.push(input.name.clone());

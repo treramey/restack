@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 pub fn init_schema(conn: &Connection) -> Result<()> {
     let mut current_version: i32 =
@@ -27,7 +27,6 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
                 name TEXT NOT NULL,
                 branch TEXT NOT NULL,
                 ordinal INTEGER NOT NULL DEFAULT 0,
-                auto_promote INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(repo_id, name)
             );
 
@@ -144,6 +143,19 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             CREATE INDEX IF NOT EXISTS idx_speculative_refs_env ON speculative_refs(env_id);
             "#,
         )?;
+        conn.pragma_update(None, "user_version", 4)?;
+    }
+
+    if current_version <= 4 {
+        // Drop auto_promote column if it exists (only present in DBs created before v5)
+        let has_auto_promote: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('environments') WHERE name = 'auto_promote'")?
+            .query_row([], |row| row.get::<_, i32>(0))
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        if has_auto_promote {
+            conn.execute_batch("ALTER TABLE environments DROP COLUMN auto_promote;")?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 

@@ -4,7 +4,7 @@ use clap::Subcommand;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::core::{promote_service, rebuild_service, repo_service};
+use crate::core::{rebuild_service, repo_service};
 use crate::db::{env_repo, repo_repo};
 use crate::error::Result;
 use crate::id::{EnvId, RepoId};
@@ -124,7 +124,7 @@ pub fn handle(conn: &Connection, cmd: &RebuildCommand, repo_path: &Path) -> Resu
     }
 }
 
-fn handle_watch(conn: &Connection, _repo_path: &Path, interval_secs: u64) -> Result<String> {
+fn handle_watch(_conn: &Connection, _repo_path: &Path, interval_secs: u64) -> Result<String> {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread;
@@ -143,36 +143,15 @@ fn handle_watch(conn: &Connection, _repo_path: &Path, interval_secs: u64) -> Res
     );
 
     let mut cycles = 0u64;
-    let mut total_promoted = 0u64;
 
     while running.load(Ordering::SeqCst) {
         cycles += 1;
         let tick_start = chrono::Utc::now();
         eprintln!(
-            "[{}] Running auto-promote cycle...",
-            tick_start.format("%H:%M:%S")
+            "[{}] Watch cycle {}...",
+            tick_start.format("%H:%M:%S"),
+            cycles
         );
-
-        match promote_service::promote_auto(conn) {
-            Ok(result) => {
-                if result.promoted.is_empty() {
-                    eprintln!(
-                        "  No topics to auto-promote ({} CI statuses refreshed)",
-                        result.refreshed_topics
-                    );
-                } else {
-                    total_promoted += result.promoted.len() as u64;
-                    eprintln!(
-                        "  Auto-promoted {} topic(s) into env(s): {}",
-                        result.promoted.len(),
-                        result.envs_changed.join(", ")
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!("  Warning: auto-promote failed: {e}");
-            }
-        }
 
         // Sleep in small increments to check the stop flag
         let mut remaining = interval_secs;
@@ -186,7 +165,6 @@ fn handle_watch(conn: &Connection, _repo_path: &Path, interval_secs: u64) -> Res
     eprintln!("\nWatch mode stopped.");
     Ok(serde_json::to_string_pretty(&serde_json::json!({
         "cycles": cycles,
-        "totalPromoted": total_promoted,
         "stopped": "graceful"
     }))?)
 }

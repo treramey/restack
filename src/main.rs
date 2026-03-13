@@ -19,8 +19,13 @@ mod types;
 mod version;
 
 use commands::{
-    conflicts::ConflictsCommand, env::EnvCommand, pr::PrCommand, promote::PromoteCommand,
-    rebuild::RebuildCommand, repo::RepoCommand, topic::TopicCommand,
+    // conflicts::ConflictsCommand,
+    env::EnvCommand,
+    // pr::PrCommand,
+    promote::PromoteCommand,
+    rebuild::RebuildCommand,
+    repo::RepoCommand,
+    topic::TopicCommand,
 };
 use output::Printer;
 
@@ -62,6 +67,10 @@ struct Cli {
     /// Show what would happen without making changes
     #[arg(long, global = true)]
     dry_run: bool,
+
+    /// Skip auto-reconciliation with .restack.yml
+    #[arg(long, global = true)]
+    no_reconcile: bool,
 }
 
 #[derive(Subcommand)]
@@ -79,7 +88,6 @@ enum Command {
     /// Repository management
     #[command(subcommand)]
     Repo(RepoCommand),
-
     /// Topic branch tracking
     #[command(subcommand)]
     Topic(TopicCommand),
@@ -96,20 +104,19 @@ enum Command {
     #[command(subcommand)]
     Rebuild(RebuildCommand),
 
-    /// List conflicts
-    #[command(subcommand)]
-    Conflicts(ConflictsCommand),
+    // /// List conflicts
+    // #[command(subcommand)]
+    // Conflicts(ConflictsCommand),
 
-    /// Pull request management
-    #[command(subcommand)]
-    Pr(PrCommand),
+    // /// Pull request management
+    // #[command(subcommand)]
+    // Pr(PrCommand),
 
-    /// Generate shell completions
-    Completions {
-        /// Shell to generate completions for
-        shell: Shell,
-    },
-
+    // /// Generate shell completions
+    // Completions {
+    //     /// Shell to generate completions for
+    //     shell: Shell,
+    // },
     /// Start the UI server
     Ui {
         /// HTTP port
@@ -136,10 +143,10 @@ fn main() {
     let cli = Cli::parse();
 
     // Completions bypass normal flow
-    if let Command::Completions { shell } = &cli.command {
-        generate(*shell, &mut Cli::command(), "restack", &mut io::stdout());
-        return;
-    }
+    // if let Command::Completions { shell } = &cli.command {
+    //     generate(*shell, &mut Cli::command(), "restack", &mut io::stdout());
+    //     return;
+    // }
 
     // UI: spawn Node.js host server
     if let Command::Ui { port } = &cli.command {
@@ -163,8 +170,23 @@ fn main() {
             std::process::exit(1);
         }
 
-        let status = std::process::Command::new("node")
-            .arg(&host_entry)
+        // Try to detect current repo from cwd
+        let context_repo_name = {
+            let db_path_for_context = core::workspace::find_workspace_root(&cwd)
+                .map(|root| core::workspace::resolve_db_path(&root))
+                .unwrap_or_else(|_| cwd.join(".restack").join("workspace.db"));
+            if let Ok(conn) = db::open_db(&db_path_for_context) {
+                core::repo_service::find_repo_from_cwd(&conn, &cwd)
+                    .ok()
+                    .flatten()
+                    .map(|r| r.name)
+            } else {
+                None
+            }
+        };
+
+        let mut cmd = std::process::Command::new("node");
+        cmd.arg(&host_entry)
             .arg("ui")
             .arg("--cli-path")
             .arg(&exe)
@@ -173,8 +195,13 @@ fn main() {
             .arg("--static-root")
             .arg(&static_root)
             .arg("--port")
-            .arg(port.to_string())
-            .status();
+            .arg(port.to_string());
+
+        if let Some(ref name) = context_repo_name {
+            cmd.arg("--context-repo").arg(name);
+        }
+
+        let status = cmd.status();
 
         match status {
             Ok(s) => std::process::exit(s.code().unwrap_or(1)),
@@ -188,7 +215,7 @@ fn main() {
 
     let db_path = cli.db.unwrap_or_else(default_db_path);
 
-    let result = run(&cli.command, &db_path);
+    let result = run(&cli.command, &db_path, cli.no_reconcile);
 
     match result {
         Ok(output) => {
@@ -212,7 +239,7 @@ fn main() {
     }
 }
 
-fn run(command: &Command, db_path: &Path) -> error::Result<String> {
+fn run(command: &Command, db_path: &Path, no_reconcile: bool) -> error::Result<String> {
     match command {
         Command::Init => {
             let cwd = std::env::current_dir()?;
@@ -226,37 +253,38 @@ fn run(command: &Command, db_path: &Path) -> error::Result<String> {
         Command::Repo(cmd) => {
             let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
-            commands::repo::handle(&conn, cmd, &cwd)
+            let workspace_root = core::workspace::find_workspace_root(&cwd)?;
+            commands::repo::handle(&conn, cmd, &workspace_root)
         }
         Command::Topic(cmd) => {
             let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
-            commands::topic::handle(&conn, cmd, &cwd)
+            commands::topic::handle(&conn, cmd, &cwd, no_reconcile)
         }
         Command::Env(cmd) => {
             let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
-            commands::env::handle(&conn, cmd, &cwd)
+            commands::env::handle(&conn, cmd, &cwd, no_reconcile)
         }
         Command::Promote(cmd) => {
             let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
-            commands::promote::handle(&conn, cmd, &cwd)
+            commands::promote::handle(&conn, cmd, &cwd, no_reconcile)
         }
         Command::Rebuild(cmd) => {
             let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
             commands::rebuild::handle(&conn, cmd, &cwd)
         }
-        Command::Conflicts(cmd) => {
-            let conn = db::open_db(db_path)?;
-            commands::conflicts::handle(&conn, cmd)
-        }
-        Command::Pr(cmd) => {
-            let conn = db::open_db(db_path)?;
-            commands::pr::handle(&conn, cmd)
-        }
-        Command::Completions { .. } => unreachable!("completions handled before run()"),
+        // Command::Conflicts(cmd) => {
+        //     let conn = db::open_db(db_path)?;
+        //     commands::conflicts::handle(&conn, cmd)
+        // }
+        // Command::Pr(cmd) => {
+        //     let conn = db::open_db(db_path)?;
+        //     commands::pr::handle(&conn, cmd)
+        // }
+        // Command::Completions { .. } => unreachable!("completions handled before run()"),
         Command::Ui { .. } => unreachable!("ui handled before run()"),
     }
 }

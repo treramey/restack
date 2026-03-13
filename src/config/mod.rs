@@ -1,3 +1,5 @@
+pub mod repo_config;
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -72,8 +74,6 @@ pub struct EnvConfig {
     pub branch: String,
     #[serde(default)]
     pub ordinal: i32,
-    #[serde(default)]
-    pub auto_promote: bool,
     #[serde(default = "default_ci_strategy")]
     pub ci_strategy: CiStrategy,
     #[serde(default)]
@@ -259,7 +259,6 @@ impl Default for WorkspaceConfig {
             EnvConfig {
                 branch: "staging".to_string(),
                 ordinal: 0,
-                auto_promote: false,
                 ci_strategy: default_ci_strategy(),
                 ci_pipeline: None,
                 max_ci_retries: default_max_ci_retries(),
@@ -271,7 +270,6 @@ impl Default for WorkspaceConfig {
             EnvConfig {
                 branch: "dev".to_string(),
                 ordinal: 1,
-                auto_promote: true,
                 ci_strategy: default_ci_strategy(),
                 ci_pipeline: None,
                 max_ci_retries: default_max_ci_retries(),

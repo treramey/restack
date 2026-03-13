@@ -67,7 +67,10 @@ pub fn get_last_rebuild(conn: &Connection, env_id: &EnvId) -> Result<Option<Rebu
     }
 }
 
-pub fn get_last_successful_ci_rebuild(conn: &Connection, env_id: &EnvId) -> Result<Option<Rebuild>> {
+pub fn get_last_successful_ci_rebuild(
+    conn: &Connection,
+    env_id: &EnvId,
+) -> Result<Option<Rebuild>> {
     let mut stmt = conn.prepare(
         "SELECT id, env_id, started_at, completed_at, status, topics_merged, topics_conflicted, result_sha, ci_status, ci_url, ci_checked_at, ci_retry_count, ci_override FROM rebuilds WHERE env_id = ?1 AND status = 'success' AND ci_status = 'passed' ORDER BY started_at DESC LIMIT 1",
     )?;
@@ -153,14 +156,18 @@ fn map_rebuild_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Rebuild> {
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
         .map(|dt| dt.with_timezone(&Utc));
 
-    let ci_status = row.get::<_, Option<String>>(8)?.and_then(|s| parse_ci_status(&s));
+    let ci_status = row
+        .get::<_, Option<String>>(8)?
+        .and_then(|s| parse_ci_status(&s));
     let ci_url = row.get(9)?;
     let ci_checked_at = row
         .get::<_, Option<String>>(10)?
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
         .map(|dt| dt.with_timezone(&Utc));
     let ci_retry_count = row.get::<_, Option<i32>>(11)?.unwrap_or(0);
-    let ci_override = row.get::<_, Option<String>>(12)?.and_then(|s| parse_ci_status(&s));
+    let ci_override = row
+        .get::<_, Option<String>>(12)?
+        .and_then(|s| parse_ci_status(&s));
 
     Ok(Rebuild {
         id: row.get(0)?,

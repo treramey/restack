@@ -5,7 +5,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::config;
-use crate::core::{discovery_service, repo_service, topic_service};
+use crate::core::{discovery_service, env_sync_service, repo_service, topic_service};
 use crate::db::repo_repo;
 use crate::error::Result;
 use crate::id::RepoId;
@@ -74,10 +74,25 @@ struct MultiRepoTopics {
     topics: Vec<Topic>,
 }
 
-pub fn handle(conn: &Connection, cmd: &TopicCommand, workspace_root: &Path) -> Result<String> {
+pub fn handle(
+    conn: &Connection,
+    cmd: &TopicCommand,
+    workspace_root: &Path,
+    no_reconcile: bool,
+) -> Result<String> {
     match cmd {
         TopicCommand::Track { branch, repo } => {
-            let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
+            let repo = if let Some(repo_arg) = repo {
+                repo_service::resolve_repo(conn, Some(repo_arg), workspace_root)?
+            } else {
+                match repo_service::resolve_repo(conn, None, workspace_root) {
+                    Ok(repo) => repo,
+                    Err(crate::error::RestackError::NotInTrackedRepo) => {
+                        repo_service::resolve_repo_by_branch(conn, branch)?
+                    }
+                    Err(e) => return Err(e),
+                }
+            };
             let topic = topic_service::track_topic(conn, &repo.id, branch)?;
             Ok(serde_json::to_string_pretty(&topic)?)
         }
@@ -145,6 +160,17 @@ pub fn handle(conn: &Connection, cmd: &TopicCommand, workspace_root: &Path) -> R
             }
 
             if *all_repos {
+                if !no_reconcile {
+                    let repos = repo_repo::list_repos(conn)?;
+                    for r in &repos {
+                        let repo_path = std::path::Path::new(&r.path);
+                        if let Some(summary) =
+                            env_sync_service::maybe_reconcile_repo_envs(conn, &r.id, repo_path)?
+                        {
+                            eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                        }
+                    }
+                }
                 let repos = repo_service::list_repos(conn)?;
                 let mut results = Vec::new();
                 for r in &repos {
@@ -165,12 +191,35 @@ pub fn handle(conn: &Connection, cmd: &TopicCommand, workspace_root: &Path) -> R
                         )
                     })
                     .transpose()?;
+                if !no_reconcile {
+                    if let Some(rid) = &repo_id {
+                        if let Ok(r) = repo_repo::get_repo(conn, rid) {
+                            let repo_path = std::path::Path::new(&r.path);
+                            if let Some(summary) =
+                                env_sync_service::maybe_reconcile_repo_envs(conn, &r.id, repo_path)?
+                            {
+                                eprintln!(
+                                    "{}",
+                                    env_sync_service::format_reconcile_summary(&summary)
+                                );
+                            }
+                        }
+                    }
+                }
                 let topics = topic_service::list_topics(conn, repo_id.as_ref())?;
                 Ok(serde_json::to_string_pretty(&topics)?)
             }
         }
         TopicCommand::Status { id, repo } => {
             let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
+            if !no_reconcile {
+                let repo_path = std::path::Path::new(&repo.path);
+                if let Some(summary) =
+                    env_sync_service::maybe_reconcile_repo_envs(conn, &repo.id, repo_path)?
+                {
+                    eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                }
+            }
             let status = topic_service::get_topic_status(conn, id, &repo.id)?;
             Ok(serde_json::to_string_pretty(&status)?)
         }

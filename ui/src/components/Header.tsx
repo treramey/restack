@@ -2,8 +2,9 @@
  * Header: [RESTACK logo] [Kanban|Canvas|List tabs] [repo selector] [spacer] [status]
  */
 
+import { useEffect } from "react";
 import { useUIStore, type ViewMode } from "../lib/store.js";
-import { useRepos } from "../lib/queries.js";
+import { useRepos, useContext } from "../lib/queries.js";
 import { isRepoId } from "../generated/types.js";
 
 const VIEW_TABS: ReadonlyArray<{ mode: ViewMode; label: string; key: string }> = [
@@ -18,6 +19,17 @@ export function Header() {
   const selectedRepoId = useUIStore((s) => s.selectedRepoId);
   const setSelectedRepoId = useUIStore((s) => s.setSelectedRepoId);
   const { data: repos } = useRepos();
+  const { data: context } = useContext();
+
+  // Auto-select repo from context on initial load
+  useEffect(() => {
+    if (context?.repoName && repos && selectedRepoId === null) {
+      const match = repos.find((r) => r.name === context.repoName);
+      if (match) {
+        setSelectedRepoId(match.id);
+      }
+    }
+  }, [context, repos, selectedRepoId, setSelectedRepoId]);
 
   const handleRepoChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;

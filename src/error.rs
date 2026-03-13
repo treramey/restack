@@ -16,6 +16,12 @@ pub enum RestackError {
     #[error("Config error: {0}")]
     Config(#[from] toml::de::Error),
 
+    #[error("YAML error: {0}")]
+    Yaml(#[from] serde_yaml::Error),
+
+    #[error("Repo config validation error: {0}")]
+    RepoConfigValidation(String),
+
     #[error("Git error: {0}")]
     Git(#[from] crate::git::GitError),
 
@@ -73,13 +79,13 @@ pub enum RestackError {
     #[error("Repo already tracked: {0}")]
     RepoAlreadyTracked(String),
 
-    #[error("No repos tracked. Run `restack init` first.")]
+    #[error("No repos tracked. Add one with `restack repo add <path>`")]
     NoRepos,
 
-    #[error("Multiple repos tracked. Specify --repo <id>.")]
+    #[error("Multiple repos tracked. Specify --repo <name>.")]
     MultipleRepos,
 
-    #[error("Not in a tracked repository. Run from within a repo or specify --repo <name>")]
+    #[error("This repo is not tracked by restack. Add it with `restack repo add .`")]
     NotInTrackedRepo,
 
     #[error("Multiple repos match name '{name}': {matches}")]
@@ -87,6 +93,14 @@ pub enum RestackError {
 
     #[error("Repository not found: {0}")]
     RepoNotFoundByName(String),
+
+    #[error("Branch '{branch}' not found in any tracked repository")]
+    BranchNotFoundInAnyRepo { branch: String },
+
+    #[error(
+        "Branch '{branch}' exists in multiple repos: {repos}. Use --repo to specify which one."
+    )]
+    BranchExistsInMultipleRepos { branch: String, repos: String },
 }
 
 pub type Result<T> = std::result::Result<T, RestackError>;
@@ -98,7 +112,7 @@ mod tests {
     #[test]
     fn test_error_not_in_tracked_repo_display() {
         let err = RestackError::NotInTrackedRepo;
-        assert!(err.to_string().contains("Not in a tracked repository"));
+        assert!(err.to_string().contains("not tracked by restack"));
     }
 
     #[test]

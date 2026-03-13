@@ -11,13 +11,12 @@ pub fn create_env(
     name: &str,
     branch: &str,
     ordinal: i32,
-    auto_promote: bool,
 ) -> Result<Environment> {
     let id = EnvId::new();
 
     conn.execute(
-        "INSERT INTO environments (id, repo_id, name, branch, ordinal, auto_promote) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![id, repo_id, name, branch, ordinal, auto_promote as i32],
+        "INSERT INTO environments (id, repo_id, name, branch, ordinal) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![id, repo_id, name, branch, ordinal],
     )?;
 
     Ok(Environment {
@@ -26,7 +25,6 @@ pub fn create_env(
         name: name.to_string(),
         branch: branch.to_string(),
         ordinal,
-        auto_promote,
         ci_status: None,
         ci_url: None,
         last_ci_check: None,
@@ -35,7 +33,7 @@ pub fn create_env(
 
 pub fn get_env(conn: &Connection, id: &EnvId) -> Result<Environment> {
     conn.query_row(
-        "SELECT id, repo_id, name, branch, ordinal, auto_promote, ci_status, ci_url, last_ci_check FROM environments WHERE id = ?1",
+        "SELECT id, repo_id, name, branch, ordinal, ci_status, ci_url, last_ci_check FROM environments WHERE id = ?1",
         [id],
         map_env_row,
     )
@@ -48,7 +46,7 @@ pub fn get_env_by_name(
     name: &str,
 ) -> Result<Option<Environment>> {
     let mut stmt = conn.prepare(
-        "SELECT id, repo_id, name, branch, ordinal, auto_promote, ci_status, ci_url, last_ci_check FROM environments WHERE repo_id = ?1 AND name = ?2",
+        "SELECT id, repo_id, name, branch, ordinal, ci_status, ci_url, last_ci_check FROM environments WHERE repo_id = ?1 AND name = ?2",
     )?;
 
     let mut rows = stmt.query(rusqlite::params![repo_id, name])?;
@@ -64,7 +62,7 @@ pub fn list_envs(conn: &Connection, repo_id: Option<&RepoId>) -> Result<Vec<Envi
     match repo_id {
         Some(rid) => {
             let mut stmt = conn.prepare(
-                "SELECT id, repo_id, name, branch, ordinal, auto_promote, ci_status, ci_url, last_ci_check FROM environments WHERE repo_id = ?1 ORDER BY ordinal",
+                "SELECT id, repo_id, name, branch, ordinal, ci_status, ci_url, last_ci_check FROM environments WHERE repo_id = ?1 ORDER BY ordinal",
             )?;
             let rows = stmt.query_map([rid], map_env_row)?;
             for row in rows {
@@ -73,7 +71,7 @@ pub fn list_envs(conn: &Connection, repo_id: Option<&RepoId>) -> Result<Vec<Envi
         }
         None => {
             let mut stmt = conn.prepare(
-                "SELECT id, repo_id, name, branch, ordinal, auto_promote, ci_status, ci_url, last_ci_check FROM environments ORDER BY ordinal",
+                "SELECT id, repo_id, name, branch, ordinal, ci_status, ci_url, last_ci_check FROM environments ORDER BY ordinal",
             )?;
             let rows = stmt.query_map([], map_env_row)?;
             for row in rows {
@@ -91,6 +89,31 @@ pub fn delete_env(conn: &Connection, id: &EnvId) -> Result<()> {
         return Err(RestackError::EnvNotFound(id.clone()));
     }
     Ok(())
+}
+
+pub fn update_env(
+    conn: &Connection,
+    env_id: &EnvId,
+    branch: &str,
+    ordinal: i32,
+) -> Result<()> {
+    let affected = conn.execute(
+        "UPDATE environments SET branch = ?1, ordinal = ?2 WHERE id = ?3",
+        rusqlite::params![branch, ordinal, env_id],
+    )?;
+    if affected == 0 {
+        return Err(RestackError::EnvNotFound(env_id.clone()));
+    }
+    Ok(())
+}
+
+pub fn count_topics_in_env(conn: &Connection, env_id: &EnvId) -> Result<i32> {
+    let count: i32 = conn.query_row(
+        "SELECT COUNT(*) FROM topic_environments WHERE env_id = ?1",
+        [env_id],
+        |row| row.get(0),
+    )?;
+    Ok(count)
 }
 
 pub fn set_env_ci_status(
@@ -122,10 +145,12 @@ fn parse_ci_status(s: &str) -> Option<CiStatus> {
 }
 
 fn map_env_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Environment> {
-    let ci_status = row.get::<_, Option<String>>(6)?.and_then(|s| parse_ci_status(&s));
-    let ci_url = row.get(7)?;
+    let ci_status = row
+        .get::<_, Option<String>>(5)?
+        .and_then(|s| parse_ci_status(&s));
+    let ci_url = row.get(6)?;
     let last_ci_check = row
-        .get::<_, Option<String>>(8)?
+        .get::<_, Option<String>>(7)?
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
         .map(|dt| dt.with_timezone(&Utc));
 
@@ -135,7 +160,6 @@ fn map_env_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Environment> {
         name: row.get(2)?,
         branch: row.get(3)?,
         ordinal: row.get(4)?,
-        auto_promote: row.get::<_, i32>(5)? != 0,
         ci_status,
         ci_url,
         last_ci_check,

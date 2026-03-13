@@ -524,9 +524,10 @@ function createPrRoutes() {
 export interface UiServerConfig {
   port: number;
   staticRoot: string;
+  contextRepo?: string;
 }
 
-export function createUiApp(staticRoot: string) {
+export function createUiApp(staticRoot: string, contextRepo?: string) {
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
 
@@ -544,6 +545,9 @@ export function createUiApp(staticRoot: string) {
 
   app
     .get("/health", (c) => c.json({ status: "ok" }))
+    .get("/api/context", (c) => {
+      return c.json({ repoName: contextRepo ?? null });
+    })
     .post("/api/cli/notify", async (c) => {
       let body: Record<string, unknown>;
       try {
@@ -583,7 +587,7 @@ export function createUiApp(staticRoot: string) {
 }
 
 export async function startUiServer(config: UiServerConfig): Promise<void> {
-  const { app, injectWebSocket } = createUiApp(config.staticRoot);
+  const { app, injectWebSocket } = createUiApp(config.staticRoot, config.contextRepo);
 
   const server = serve(
     {

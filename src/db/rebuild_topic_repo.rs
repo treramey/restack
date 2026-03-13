@@ -26,7 +26,11 @@ pub fn get_topics_for_rebuild(
     )?;
 
     let rows = stmt.query_map([rebuild_id], |row| {
-        Ok((row.get::<_, TopicId>(0)?, row.get::<_, i32>(1)?, row.get::<_, i32>(2)?))
+        Ok((
+            row.get::<_, TopicId>(0)?,
+            row.get::<_, i32>(1)?,
+            row.get::<_, i32>(2)?,
+        ))
     })?;
 
     let mut results = Vec::new();

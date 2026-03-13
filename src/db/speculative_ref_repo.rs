@@ -111,14 +111,20 @@ fn parse_ci_status(s: &str) -> Option<CiStatus> {
 }
 
 fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SpeculativeRef> {
-    let ci_status = row.get::<_, Option<String>>(7)?.and_then(|s| parse_ci_status(&s));
-    let created_at = row
-        .get::<_, String>(9)
-        .and_then(|s| {
-            chrono::DateTime::parse_from_rfc3339(&s)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|_| rusqlite::Error::InvalidColumnType(9, "created_at".to_string(), rusqlite::types::Type::Text))
-        })?;
+    let ci_status = row
+        .get::<_, Option<String>>(7)?
+        .and_then(|s| parse_ci_status(&s));
+    let created_at = row.get::<_, String>(9).and_then(|s| {
+        chrono::DateTime::parse_from_rfc3339(&s)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|_| {
+                rusqlite::Error::InvalidColumnType(
+                    9,
+                    "created_at".to_string(),
+                    rusqlite::types::Type::Text,
+                )
+            })
+    })?;
 
     Ok(SpeculativeRef {
         id: row.get(0)?,

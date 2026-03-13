@@ -101,6 +101,17 @@ export function useCiStatus(repoId: RepoId | null) {
   });
 }
 
+export function useContext() {
+  return useQuery({
+    queryKey: ["context"],
+    queryFn: async () => {
+      const res = await fetch("/api/context");
+      return res.json() as Promise<{ repoName: string | null }>;
+    },
+    staleTime: Infinity,
+  });
+}
+
 export function useRebuildStatus() {
   return useQuery({
     queryKey: ["rebuildStatus"] as const,

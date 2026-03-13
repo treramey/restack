@@ -15,6 +15,7 @@ interface Args {
   cwd: string;
   staticRoot: string;
   port: number;
+  contextRepo?: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -75,6 +76,14 @@ function parseArgs(argv: readonly string[]): Args {
         }
         i++;
         break;
+      case "--context-repo":
+        if (!next) {
+          console.error("--context-repo requires a value");
+          process.exit(1);
+        }
+        result.contextRepo = next;
+        i++;
+        break;
       case "--help":
       case "-h":
         printUsage();
@@ -129,6 +138,7 @@ async function main(): Promise<void> {
       await startUiServer({
         port: args.port,
         staticRoot: args.staticRoot,
+        contextRepo: args.contextRepo,
       });
       break;
   }

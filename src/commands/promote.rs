@@ -3,8 +3,7 @@ use std::path::Path;
 use clap::Subcommand;
 use rusqlite::Connection;
 
-use crate::core::promote_service;
-use crate::core::repo_service;
+use crate::core::{env_sync_service, promote_service, repo_service};
 use crate::error::Result;
 
 #[derive(Subcommand)]
@@ -22,8 +21,6 @@ pub enum PromoteCommand {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Auto-promote CI-passed topics to auto_promote environments
-    Auto,
     /// Demote a topic from an environment
     From {
         /// Topic ID or branch name
@@ -39,12 +36,13 @@ pub enum PromoteCommand {
     },
 }
 
-pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Result<String> {
+pub fn handle(
+    conn: &Connection,
+    cmd: &PromoteCommand,
+    repo_path: &Path,
+    no_reconcile: bool,
+) -> Result<String> {
     match cmd {
-        PromoteCommand::Auto => {
-            let result = promote_service::promote_auto(conn)?;
-            Ok(serde_json::to_string_pretty(&result)?)
-        }
         PromoteCommand::To {
             topic,
             env,
@@ -52,6 +50,14 @@ pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Resu
             dry_run,
         } => {
             let repo = repo_service::resolve_repo(conn, repo.as_deref(), repo_path)?;
+            if !no_reconcile {
+                let r_path = std::path::Path::new(&repo.path);
+                if let Some(summary) =
+                    env_sync_service::maybe_reconcile_repo_envs(conn, &repo.id, r_path)?
+                {
+                    eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                }
+            }
             let result =
                 promote_service::promote_to(conn, topic, env, &repo.id, repo_path, *dry_run)?;
             Ok(serde_json::to_string_pretty(&result)?)
@@ -63,6 +69,14 @@ pub fn handle(conn: &Connection, cmd: &PromoteCommand, repo_path: &Path) -> Resu
             dry_run,
         } => {
             let repo = repo_service::resolve_repo(conn, repo.as_deref(), repo_path)?;
+            if !no_reconcile {
+                let r_path = std::path::Path::new(&repo.path);
+                if let Some(summary) =
+                    env_sync_service::maybe_reconcile_repo_envs(conn, &repo.id, r_path)?
+                {
+                    eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                }
+            }
             let result =
                 promote_service::demote_from(conn, topic, env, &repo.id, repo_path, *dry_run)?;
             Ok(serde_json::to_string_pretty(&result)?)

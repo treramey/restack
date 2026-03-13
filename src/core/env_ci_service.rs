@@ -5,7 +5,7 @@ use crate::db::{env_repo, rebuild_repo, topic_repo};
 use crate::error::Result;
 use crate::id::{EnvId, TopicId};
 use crate::provider;
-use crate::types::{CiStatus, Repo, RebuildStatus, TopicStatus};
+use crate::types::{CiStatus, RebuildStatus, Repo, TopicStatus};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,16 +79,32 @@ pub fn refresh_env_ci_statuses(conn: &Connection, repo: &Repo) -> Result<Vec<Env
                 )?;
                 env_repo::set_env_ci_status(conn, &env.id, Some(CiStatus::Pending), ci_url)?;
             } else {
-                let blame_outcome = super::speculative_ci_service::speculative_blame_or_fallback(conn, &env.id, repo)?;
+                let blame_outcome = super::speculative_ci_service::speculative_blame_or_fallback(
+                    conn, &env.id, repo,
+                )?;
                 match blame_outcome {
                     super::speculative_ci_service::BlameOutcome::NoPending => {
                         // Speculative CI still pending — reset to Pending and retry next cycle
-                        rebuild_repo::set_rebuild_ci_status(conn, &rebuild.id, Some(CiStatus::Pending), ci_url)?;
-                        env_repo::set_env_ci_status(conn, &env.id, Some(CiStatus::Pending), ci_url)?;
+                        rebuild_repo::set_rebuild_ci_status(
+                            conn,
+                            &rebuild.id,
+                            Some(CiStatus::Pending),
+                            ci_url,
+                        )?;
+                        env_repo::set_env_ci_status(
+                            conn,
+                            &env.id,
+                            Some(CiStatus::Pending),
+                            ci_url,
+                        )?;
                     }
                     super::speculative_ci_service::BlameOutcome::Speculative(spec) => {
                         if let Some(ref culprit_id) = spec.culprit_topic_id {
-                            topic_repo::update_topic_status(conn, culprit_id, TopicStatus::CiQuarantined)?;
+                            topic_repo::update_topic_status(
+                                conn,
+                                culprit_id,
+                                TopicStatus::CiQuarantined,
+                            )?;
                             blamed_topic = Some(culprit_id.clone());
 
                             if let Ok(topic) = topic_repo::get_topic(conn, culprit_id) {
@@ -112,20 +128,38 @@ pub fn refresh_env_ci_statuses(conn: &Connection, repo: &Repo) -> Result<Vec<Env
                     }
                     super::speculative_ci_service::BlameOutcome::Differential(diff) => {
                         if let Some(suspect) = diff.suspects.first() {
-                            topic_repo::update_topic_status(conn, &suspect.topic_id, TopicStatus::CiQuarantined)?;
+                            topic_repo::update_topic_status(
+                                conn,
+                                &suspect.topic_id,
+                                TopicStatus::CiQuarantined,
+                            )?;
                             blamed_topic = Some(suspect.topic_id.clone());
 
                             if let Ok(topic) = topic_repo::get_topic(conn, &suspect.topic_id) {
                                 if let Some(pr_number) = topic.pr_id.as_deref() {
                                     let confidence_str = match diff.confidence {
-                                        super::blame_service::BlameConfidence::High => "high confidence",
-                                        super::blame_service::BlameConfidence::Medium => "medium confidence (multiple new topics)",
-                                        super::blame_service::BlameConfidence::Low => "low confidence (heuristic)",
+                                        super::blame_service::BlameConfidence::High => {
+                                            "high confidence"
+                                        }
+                                        super::blame_service::BlameConfidence::Medium => {
+                                            "medium confidence (multiple new topics)"
+                                        }
+                                        super::blame_service::BlameConfidence::Low => {
+                                            "low confidence (heuristic)"
+                                        }
                                     };
                                     let other_suspects = if diff.suspects.len() > 1 {
-                                        format!("\n\nOther suspects: {}", diff.suspects[1..].iter()
-                                            .map(|s| format!("`{}`", s.branch)).collect::<Vec<_>>().join(", "))
-                                    } else { String::new() };
+                                        format!(
+                                            "\n\nOther suspects: {}",
+                                            diff.suspects[1..]
+                                                .iter()
+                                                .map(|s| format!("`{}`", s.branch))
+                                                .collect::<Vec<_>>()
+                                                .join(", ")
+                                        )
+                                    } else {
+                                        String::new()
+                                    };
                                     let body = format!(
                                         "**Restack env CI failure** ({})\n\n\
                                          Branch `{}` is the likely cause of CI failure on environment `{}`.\n\

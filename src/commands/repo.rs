@@ -12,7 +12,8 @@ pub enum RepoCommand {
     List,
     /// Add a repository to the workspace
     Add {
-        /// Path to the repository
+        /// Path to the repository (defaults to current directory)
+        #[arg(default_value = ".")]
         path: String,
         /// Optional name for the repository (defaults to directory name)
         #[arg(short, long)]

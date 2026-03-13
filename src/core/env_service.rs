@@ -20,9 +20,8 @@ pub fn add_env(
     name: &str,
     branch: &str,
     ordinal: i32,
-    auto_promote: bool,
 ) -> Result<Environment> {
-    env_repo::create_env(conn, repo_id, name, branch, ordinal, auto_promote)
+    env_repo::create_env(conn, repo_id, name, branch, ordinal)
 }
 
 pub fn list_envs(conn: &Connection, repo_id: Option<&RepoId>) -> Result<Vec<Environment>> {

@@ -92,8 +92,7 @@ pub fn check_speculative_ci(
 
     for (i, spec_ref) in updated_refs.iter().enumerate() {
         if spec_ref.ci_status == Some(CiStatus::Failed) {
-            let prev_passed = i == 0
-                || updated_refs[i - 1].ci_status == Some(CiStatus::Passed);
+            let prev_passed = i == 0 || updated_refs[i - 1].ci_status == Some(CiStatus::Passed);
 
             if prev_passed {
                 breakpoint_step = Some(spec_ref.step);

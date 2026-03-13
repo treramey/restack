@@ -105,7 +105,6 @@ pub struct Environment {
     pub name: String,
     pub branch: String,
     pub ordinal: i32,
-    pub auto_promote: bool,
     pub ci_status: Option<CiStatus>,
     pub ci_url: Option<String>,
     pub last_ci_check: Option<DateTime<Utc>>,
