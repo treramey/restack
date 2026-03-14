@@ -69,6 +69,55 @@
   --color-hl-high: #524f67;
 }
 
+/* ── Motion tokens ────────────────────────────────────────────────── */
+/* Durations: feedback 100ms, state-change 150ms, layout 200ms       */
+/* Easing: quart-out feels decisive without bounce.                   */
+
+/* ── Keyframes ────────────────────────────────────────────────────── */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ghost-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 0.8; }
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 0.15; }
+}
+
+/* ── Utility classes ──────────────────────────────────────────────── */
+
+.animate-fade-in {
+  animation: fade-in 150ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+.animate-scale-in {
+  animation: scale-in 150ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+.animate-ghost-pulse {
+  animation: ghost-pulse 2s ease-in-out infinite;
+}
+
+.animate-skeleton-pulse {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Backdrop: fast fade from transparent */
+.animate-backdrop {
+  animation: fade-in 100ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
 /* Reduced motion: collapse all transitions/animations for users who prefer it. */
 @media (prefers-reduced-motion: reduce) {
   *,

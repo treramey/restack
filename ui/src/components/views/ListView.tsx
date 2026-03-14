@@ -22,6 +22,7 @@ import type {
   EnvId,
 } from "../../generated/types.js";
 import { STATUS_BADGE, CI_BADGE, ORIGIN_BADGE } from "../../lib/badges.js";
+import { Badge } from "../Badge.js";
 
 // ── Sort config ──────────────────────────────────────────────────────
 
@@ -40,14 +41,6 @@ interface TopicRow {
   repoName: string;
   envNames: string[];
   envCount: number;
-}
-
-function Badge({ label, colorClass }: { label: string; colorClass: string }) {
-  return (
-    <span className={`px-1.5 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${colorClass}`}>
-      {label}
-    </span>
-  );
 }
 
 // ── Sort arrow ───────────────────────────────────────────────────────
@@ -190,97 +183,109 @@ export function ListView() {
 
   return (
     <div className="flex-1 flex flex-col bg-bg-primary overflow-hidden">
-      {/* Table header */}
-      <div className="flex items-center px-4 py-2 border-b border-border bg-bg-secondary shrink-0 gap-2">
-        {columns.map((col) => (
-          <button
-            key={col.field}
-            className={`${col.className} text-left text-[11px] font-mono uppercase tracking-wider text-text-dim hover:text-text-muted transition-colors cursor-pointer flex items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:rounded`}
-            onClick={() => toggleSort(col.field)}
-          >
-            {col.label}
-            <SortIndicator active={sort.field === col.field} dir={sort.dir} />
-          </button>
-        ))}
-      </div>
-
-      {/* Rows */}
       <div className="flex-1 overflow-y-auto">
-        {sortedRows.map((row) => {
-          const isSelected = selectedTopicId === row.topic.id;
-          return (
-            <button
-              key={row.topic.id}
-              type="button"
-              className={`
-                w-full flex items-center px-4 py-2.5 gap-2 text-left
-                border-b border-border/50 transition-colors cursor-pointer
-                focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-inset
-                ${isSelected
-                  ? "bg-accent-subtle border-accent/30"
-                  : "hover:bg-surface-primary/50"}
-              `}
-              onClick={() => handleRowClick(row.topic.id)}
-            >
-              {/* Repo */}
-              <span className="w-[140px] text-xs font-mono text-text-muted truncate">
-                {row.repoName}
-              </span>
+        <table className="w-full border-collapse font-mono">
+          <thead className="sticky top-0 z-10 bg-bg-secondary">
+            <tr className="border-b border-border">
+              {columns.map((col) => (
+                <th
+                  key={col.field}
+                  scope="col"
+                  className={`${col.className} px-4 py-2 text-left text-[11px] uppercase tracking-wider text-text-dim hover:text-text-muted transition-colors cursor-pointer font-normal focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-inset`}
+                  tabIndex={0}
+                  onClick={() => toggleSort(col.field)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSort(col.field); } }}
+                  aria-sort={sort.field === col.field ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
+                >
+                  {col.label}
+                  <SortIndicator active={sort.field === col.field} dir={sort.dir} />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedRows.map((row) => {
+              const isSelected = selectedTopicId === row.topic.id;
+              return (
+                <tr
+                  key={row.topic.id}
+                  tabIndex={0}
+                  aria-selected={isSelected}
+                  className={`
+                    border-b border-border/50 transition-colors cursor-pointer
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus focus-visible:ring-inset
+                    ${isSelected
+                      ? "bg-accent-subtle border-accent/30"
+                      : "hover:bg-surface-primary/50"}
+                  `}
+                  onClick={() => handleRowClick(row.topic.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleRowClick(row.topic.id); } }}
+                >
+                  {/* Repo */}
+                  <td className="w-[140px] px-4 py-2.5 text-xs text-text-muted truncate max-w-[140px]">
+                    {row.repoName}
+                  </td>
 
-              {/* Branch */}
-              <span className="flex-1 min-w-[180px] text-sm font-mono text-text-primary truncate flex items-center gap-2">
-                <span className="truncate">{row.topic.branch}</span>
-                {row.topic.branchOrigin !== "tracked" && (
-                  <Badge
-                    label={row.topic.branchOrigin === "local-only" ? "local" : "orphaned"}
-                    colorClass={ORIGIN_BADGE[row.topic.branchOrigin]}
-                  />
-                )}
-              </span>
-
-              {/* Status */}
-              <span className="w-[100px]">
-                <Badge
-                  label={row.topic.status}
-                  colorClass={STATUS_BADGE[row.topic.status] ?? STATUS_BADGE["closed"]!}
-                />
-              </span>
-
-              {/* CI */}
-              <span className="w-[90px]">
-                {row.topic.ciStatus ? (
-                  <Badge
-                    label={row.topic.ciStatus}
-                    colorClass={CI_BADGE[row.topic.ciStatus] ?? CI_BADGE["pending"]!}
-                  />
-                ) : (
-                  <span className="text-[10px] font-mono text-text-dim">--</span>
-                )}
-              </span>
-
-              {/* Environments */}
-              <span className="w-[180px] flex flex-wrap gap-1">
-                {row.envNames.length > 0 ? (
-                  row.envNames.map((name) => (
-                    <span
-                      key={name}
-                      className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-surface-secondary border border-border text-text-muted"
-                    >
-                      {name}
+                  {/* Branch */}
+                  <td className="px-4 py-2.5 text-sm text-text-primary truncate max-w-0">
+                    <span className="flex items-center gap-2">
+                      <span className="truncate">{row.topic.branch}</span>
+                      {row.topic.branchOrigin !== "tracked" && (
+                        <Badge
+                          label={row.topic.branchOrigin === "local-only" ? "local" : "orphaned"}
+                          colorClass={ORIGIN_BADGE[row.topic.branchOrigin]}
+                        />
+                      )}
                     </span>
-                  ))
-                ) : (
-                  <span className="text-[10px] font-mono text-text-dim">--</span>
-                )}
-              </span>
+                  </td>
 
-              {/* Created */}
-              <span className="w-[90px] text-[11px] font-mono text-text-dim">
-                {formatRelative(row.topic.createdAt)}
-              </span>
-            </button>
-          );
-        })}
+                  {/* Status */}
+                  <td className="w-[100px] px-4 py-2.5">
+                    <Badge
+                      label={row.topic.status}
+                      colorClass={STATUS_BADGE[row.topic.status] ?? STATUS_BADGE.closed}
+                    />
+                  </td>
+
+                  {/* CI */}
+                  <td className="w-[90px] px-4 py-2.5">
+                    {row.topic.ciStatus ? (
+                      <Badge
+                        label={row.topic.ciStatus}
+                        colorClass={CI_BADGE[row.topic.ciStatus] ?? CI_BADGE.pending}
+                      />
+                    ) : (
+                      <span className="text-[10px] text-text-dim">--</span>
+                    )}
+                  </td>
+
+                  {/* Environments */}
+                  <td className="w-[180px] px-4 py-2.5">
+                    <span className="flex flex-wrap gap-1">
+                      {row.envNames.length > 0 ? (
+                        row.envNames.map((name) => (
+                          <span
+                            key={name}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-surface-secondary border border-border text-text-muted"
+                          >
+                            {name}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-[10px] text-text-dim">--</span>
+                      )}
+                    </span>
+                  </td>
+
+                  {/* Created */}
+                  <td className="w-[90px] px-4 py-2.5 text-[11px] text-text-dim">
+                    {formatRelative(row.topic.createdAt)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {/* Footer */}

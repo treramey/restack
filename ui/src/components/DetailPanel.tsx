@@ -3,15 +3,18 @@
  * Positioned at bottom, resizable via drag handle.
  */
 
-import { useRef, useEffect, useMemo } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import {
   useUIStore,
   clampPanelHeight,
+  usePanelHeightClamp,
   PANEL_HEIGHT_MIN,
   PANEL_HEIGHT_MAX_VH,
 } from "../lib/store.js";
 import { useTopics, useEnvironments, useTopicEnvironments, useRepos, useConflicts } from "../lib/queries.js";
+import { usePromote, useDemote, useCreatePr, useCloseTopic } from "../lib/mutations.js";
 import { STATUS_BADGE, CI_BADGE } from "../lib/badges.js";
+import { Badge } from "./Badge.js";
 import type { TopicStatus, CiStatus } from "../generated/types.js";
 
 const COLLAPSED_HEIGHT = 40;
@@ -28,6 +31,16 @@ export function DetailPanel() {
   const { data: topicEnvs } = useTopicEnvironments();
   const { data: repos } = useRepos();
   const { data: conflicts } = useConflicts();
+
+  const promote = usePromote();
+  const demote = useDemote();
+  const createPr = useCreatePr();
+  const closeTopic = useCloseTopic();
+
+  usePanelHeightClamp();
+
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [closeInput, setCloseInput] = useState("");
 
   const selectedTopic = selectedTopicId
     ? topics?.find((t) => t.id === selectedTopicId) ?? null
@@ -47,6 +60,30 @@ export function DetailPanel() {
     if (!selectedTopicId || !conflicts) return [];
     return conflicts.filter((c) => c.topicId === selectedTopicId && !c.resolved);
   }, [selectedTopicId, conflicts]);
+
+  // Environments for this repo (all, sorted by ordinal) for action logic
+  const repoEnvironments = useMemo(() => {
+    if (!environments || !selectedTopic) return [];
+    return environments
+      .filter((e) => e.repoId === selectedTopic.repoId)
+      .sort((a, b) => a.ordinal - b.ordinal);
+  }, [environments, selectedTopic]);
+
+  // Topic's environments sorted by ordinal
+  const topicEnvironmentsSorted = useMemo(
+    () => [...topicEnvironments].sort((a, b) => a.ordinal - b.ordinal),
+    [topicEnvironments],
+  );
+
+  const highestEnv = topicEnvironmentsSorted[topicEnvironmentsSorted.length - 1] ?? null;
+  const maxOrdinalEnv = repoEnvironments[repoEnvironments.length - 1] ?? null;
+  const isInLastEnv = highestEnv !== null && maxOrdinalEnv !== null && highestEnv.id === maxOrdinalEnv.id;
+  const nextEnv = highestEnv !== null
+    ? repoEnvironments.find((e) => e.ordinal === highestEnv.ordinal + 1) ?? null
+    : null;
+  const isUnassigned = topicEnvironments.length === 0;
+  const isGraduated = selectedTopic?.status === "graduated";
+  const isMutating = promote.isPending || demote.isPending || createPr.isPending || closeTopic.isPending;
 
   const age = useMemo(() => {
     if (!selectedTopic) return null;
@@ -162,6 +199,7 @@ export function DetailPanel() {
         onClick={toggleDetailPanel}
         aria-expanded={detailPanelOpen}
         aria-controls="detail-panel-content"
+        aria-label="Toggle detail panel"
       >
         <div className="flex items-center gap-2">
           <svg
@@ -196,7 +234,7 @@ export function DetailPanel() {
           className="flex-1 overflow-hidden border-t border-border"
         >
           {selectedTopic ? (
-            <dl className="h-full overflow-y-auto p-4 space-y-4">
+            <dl className="h-full overflow-y-auto p-4 space-y-4 animate-fade-in">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Branch</dt>
@@ -209,7 +247,7 @@ export function DetailPanel() {
                 {selectedTopic.status !== "active" && (
                   <div className="space-y-1">
                     <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Status</dt>
-                    <dd><StatusBadge label={selectedTopic.status} colorClass={STATUS_BADGE[selectedTopic.status as TopicStatus] ?? STATUS_BADGE.closed} /></dd>
+                    <dd><Badge label={selectedTopic.status} colorClass={STATUS_BADGE[selectedTopic.status as TopicStatus] ?? STATUS_BADGE.closed} /></dd>
                   </div>
                 )}
                 <div className="space-y-1">
@@ -249,7 +287,7 @@ export function DetailPanel() {
                 <div className="space-y-1">
                   <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">CI Status</dt>
                   <dd className="flex items-center gap-3">
-                    <StatusBadge label={selectedTopic.ciStatus} colorClass={CI_BADGE[selectedTopic.ciStatus as CiStatus] ?? CI_BADGE.pending} />
+                    <Badge label={selectedTopic.ciStatus} colorClass={CI_BADGE[selectedTopic.ciStatus as CiStatus] ?? CI_BADGE.pending} />
                     {selectedTopic.ciUrl && (
                       <a
                         href={selectedTopic.ciUrl}
@@ -288,10 +326,117 @@ export function DetailPanel() {
                   </dd>
                 </div>
               )}
+
+              <div className="space-y-1 pt-2 border-t border-border/50">
+                <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Actions</dt>
+                <dd className="flex items-center gap-2 flex-wrap">
+                  {/* Promote: in an env and there's a next env */}
+                  {highestEnv !== null && nextEnv !== null && !isGraduated && (
+                    <DetailActionButton
+                      label={`→ ${nextEnv.name}`}
+                      title={`Promote to ${nextEnv.name}`}
+                      disabled={isMutating}
+                      onClick={() => {
+                        if (selectedTopic && nextEnv) {
+                          promote.mutate({ topicId: selectedTopic.id, envId: nextEnv.id, repoId: selectedTopic.repoId });
+                        }
+                      }}
+                    />
+                  )}
+                  {/* Graduate: in last env and not graduated */}
+                  {isInLastEnv && !isGraduated && selectedTopic && selectedRepo && (
+                    <DetailActionButton
+                      label="Graduate →"
+                      title="Create PR to merge into base branch"
+                      disabled={isMutating}
+                      onClick={() => {
+                        if (selectedTopic && selectedRepo) {
+                          createPr.mutate(
+                            { repo: selectedTopic.repoId, head: selectedTopic.branch, base: selectedRepo.baseBranch, title: selectedTopic.branch },
+                            { onSuccess: (pr) => { if (pr.url) window.open(pr.url, "_blank"); } },
+                          );
+                        }
+                      }}
+                    />
+                  )}
+                  {/* Archive/Demote: in any env and not graduated */}
+                  {highestEnv !== null && !isGraduated && (
+                    <DetailActionButton
+                      label="Archive"
+                      title="Remove from environment"
+                      disabled={isMutating}
+                      variant="danger"
+                      onClick={() => {
+                        if (selectedTopic && highestEnv) {
+                          demote.mutate({ topicId: selectedTopic.id, envId: highestEnv.id, repoId: selectedTopic.repoId });
+                        }
+                      }}
+                    />
+                  )}
+                  {/* Create PR: no PR yet */}
+                  {selectedTopic && selectedRepo && !selectedTopic.prUrl && (
+                    <DetailActionButton
+                      label="Create PR"
+                      title="Create a pull request for this branch"
+                      disabled={isMutating}
+                      onClick={() => {
+                        if (selectedTopic && selectedRepo) {
+                          createPr.mutate(
+                            { repo: selectedTopic.repoId, head: selectedTopic.branch, base: selectedRepo.baseBranch, title: selectedTopic.branch },
+                            { onSuccess: (pr) => { if (pr.url) window.open(pr.url, "_blank"); } },
+                          );
+                        }
+                      }}
+                    />
+                  )}
+                  {/* Close: unassigned and not graduated */}
+                  {isUnassigned && !isGraduated && selectedTopic && (
+                    <DetailActionButton
+                      label="Close"
+                      title="Delete branch from origin and local"
+                      disabled={isMutating}
+                      variant="danger"
+                      onClick={() => setShowCloseConfirm(true)}
+                    />
+                  )}
+                  {/* Clean up branch: graduated and unassigned */}
+                  {isUnassigned && isGraduated && selectedTopic && (
+                    <DetailActionButton
+                      label="Clean up branch"
+                      title="Delete branch (already merged)"
+                      disabled={isMutating}
+                      onClick={() => {
+                        if (selectedTopic) {
+                          closeTopic.mutate({ topicId: selectedTopic.id, repoId: selectedTopic.repoId });
+                        }
+                      }}
+                    />
+                  )}
+                </dd>
+              </div>
+
+              {/* Inline close confirmation */}
+              {showCloseConfirm && selectedTopic && (
+                <CloseConfirmInline
+                  branch={selectedTopic.branch}
+                  closeInput={closeInput}
+                  disabled={isMutating}
+                  onInputChange={setCloseInput}
+                  onConfirm={() => {
+                    if (selectedTopic) {
+                      closeTopic.mutate({ topicId: selectedTopic.id, repoId: selectedTopic.repoId });
+                      setShowCloseConfirm(false);
+                      setCloseInput("");
+                    }
+                  }}
+                  onCancel={() => { setShowCloseConfirm(false); setCloseInput(""); }}
+                />
+              )}
             </dl>
           ) : (
-            <div className="h-full flex items-center justify-center text-text-muted text-sm font-mono">
-              Select a topic to view details
+            <div className="h-full flex flex-col items-center justify-center gap-1 animate-fade-in">
+              <span className="text-text-muted text-sm font-mono">No topic selected</span>
+              <span className="text-text-dim text-xs font-mono">Click a card or press <kbd className="px-1 py-0.5 rounded bg-surface-primary border border-border text-[10px]">Enter</kbd> to inspect</span>
             </div>
           )}
         </div>
@@ -300,10 +445,130 @@ export function DetailPanel() {
   );
 }
 
-function StatusBadge({ label, colorClass }: { label: string; colorClass: string }) {
+
+function CloseConfirmInline({
+  branch,
+  closeInput,
+  disabled,
+  onInputChange,
+  onConfirm,
+  onCancel,
+}: {
+  branch: string;
+  closeInput: string;
+  disabled: boolean;
+  onInputChange: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        onCancel();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const focusable = container!.querySelectorAll<HTMLElement>(
+        'input, button, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusable.length === 0) return;
+
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
+
+    container.addEventListener("keydown", handleKeyDown);
+    return () => container.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
   return (
-    <span className={`px-2 py-0.5 rounded border text-[10px] font-mono uppercase tracking-wider ${colorClass}`}>
+    <div ref={containerRef} className="space-y-2 p-3 rounded border border-status-conflict/30 bg-status-conflict/5">
+      <p className="text-xs font-mono text-text-muted">
+        Delete <span className="text-status-conflict font-bold">{branch}</span> from origin and local? This cannot be undone.
+      </p>
+      <p className="text-[10px] font-mono text-text-dim">Type the branch name to confirm:</p>
+      <input
+        type="text"
+        value={closeInput}
+        onChange={(e) => onInputChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && closeInput === branch) {
+            onConfirm();
+          }
+        }}
+        className="w-full px-2 py-1.5 rounded border border-border bg-bg-primary text-text-primary font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+        placeholder={branch}
+        autoFocus
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-[10px] font-mono px-2 py-1 min-h-[28px] inline-flex items-center rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary transition-colors cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={closeInput !== branch || disabled}
+          onClick={onConfirm}
+          className="text-[10px] font-mono px-2 py-1 min-h-[28px] inline-flex items-center rounded border border-status-conflict/50 text-status-conflict hover:bg-status-conflict/10 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          Delete branch
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DetailActionButton({
+  label,
+  title,
+  disabled,
+  onClick,
+  variant = "default",
+}: {
+  label: string;
+  title: string;
+  disabled: boolean;
+  onClick: () => void;
+  variant?: "default" | "danger";
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={`
+        text-[10px] font-mono px-2 py-1 min-h-[28px] inline-flex items-center rounded border cursor-pointer
+        transition-colors disabled:opacity-40 disabled:cursor-not-allowed
+        ${
+          variant === "danger"
+            ? "border-status-conflict/30 text-status-conflict/70 hover:text-status-conflict hover:bg-status-conflict/10"
+            : "border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary"
+        }
+      `}
+    >
       {label}
-    </span>
+    </button>
   );
 }

@@ -9,6 +9,7 @@
  * Server state (repos/topics/envs) stays in TanStack Query.
  */
 
+import { useEffect } from "react";
 import { create } from "zustand";
 import type { RepoId, TopicId } from "../generated/types.js";
 
@@ -18,6 +19,7 @@ const STORAGE_PREFIX = "restack.ui.v1";
 
 const PANEL_HEIGHT_KEY = `${STORAGE_PREFIX}.detailPanelHeight`;
 const VIEW_MODE_KEY = `${STORAGE_PREFIX}.viewMode`;
+const SELECTED_REPO_KEY = `${STORAGE_PREFIX}.selectedRepoId`;
 
 const DEFAULT_PANEL_HEIGHT = 320;
 export const PANEL_HEIGHT_MIN = 120;
@@ -49,9 +51,25 @@ function loadString<T extends string>(key: string, fallback: T, valid: readonly 
   }
 }
 
+function loadNullableString(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 function save(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
+  } catch {
+    // Private browsing or quota exceeded
+  }
+}
+
+function remove(key: string): void {
+  try {
+    localStorage.removeItem(key);
   } catch {
     // Private browsing or quota exceeded
   }
@@ -80,7 +98,7 @@ export type UIStore = UIState & UIActions;
 
 export const useUIStore = create<UIStore>((set) => ({
   viewMode: loadString(VIEW_MODE_KEY, "kanban", VIEW_MODES),
-  selectedRepoId: null,
+  selectedRepoId: loadNullableString(SELECTED_REPO_KEY) as RepoId | null,
   selectedTopicId: null,
   detailPanelOpen: false,
   panelHeight: clampPanelHeight(loadNumber(PANEL_HEIGHT_KEY, DEFAULT_PANEL_HEIGHT)),
@@ -90,7 +108,14 @@ export const useUIStore = create<UIStore>((set) => ({
     set({ viewMode: mode });
   },
 
-  setSelectedRepoId: (id) => set({ selectedRepoId: id }),
+  setSelectedRepoId: (id) => {
+    if (id !== null) {
+      save(SELECTED_REPO_KEY, id);
+    } else {
+      remove(SELECTED_REPO_KEY);
+    }
+    set({ selectedRepoId: id });
+  },
 
   setSelectedTopicId: (id) =>
     set((state) => ({
@@ -109,3 +134,24 @@ export const useUIStore = create<UIStore>((set) => ({
     set({ panelHeight: clamped });
   },
 }));
+
+/** Re-clamp panel height when window is resized (e.g. panel exceeds new max). */
+export function usePanelHeightClamp() {
+  const panelHeight = useUIStore((s) => s.panelHeight);
+  const detailPanelOpen = useUIStore((s) => s.detailPanelOpen);
+  const setPanelHeight = useUIStore((s) => s.setPanelHeight);
+
+  useEffect(() => {
+    if (!detailPanelOpen) return;
+
+    function handleResize() {
+      const clamped = clampPanelHeight(panelHeight);
+      if (clamped !== panelHeight) {
+        setPanelHeight(clamped);
+      }
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [panelHeight, detailPanelOpen, setPanelHeight]);
+}

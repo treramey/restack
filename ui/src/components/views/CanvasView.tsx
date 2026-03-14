@@ -190,7 +190,11 @@ const RepoNodeComponent = memo(function RepoNodeComponent({
     <>
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <div
-        className="flex items-center gap-2 border border-border bg-surface-primary px-3 py-2 rounded hover:border-border-hover transition-colors cursor-pointer"
+        role="button"
+        tabIndex={0}
+        aria-label={repo.name}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.currentTarget.click(); } }}
+        className="flex items-center gap-2 border border-border bg-surface-primary px-3 py-2 rounded hover:border-border-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
         style={{ width: REPO_NODE_WIDTH, height: REPO_NODE_HEIGHT }}
       >
         {/* Folder icon */}
@@ -221,7 +225,11 @@ const TopicNodeComponent = memo(function TopicNodeComponent({
     <>
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <div
-        className="flex items-center gap-2 border bg-surface-primary px-3 py-2 rounded cursor-pointer hover:border-border-hover transition-colors"
+        role="button"
+        tabIndex={0}
+        aria-label={topic.branch}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.currentTarget.click(); } }}
+        className="flex items-center gap-2 border bg-surface-primary px-3 py-2 rounded cursor-pointer hover:border-border-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
         style={{
           width: TOPIC_NODE_WIDTH,
           height: TOPIC_NODE_HEIGHT,

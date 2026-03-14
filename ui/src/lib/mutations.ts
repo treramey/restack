@@ -60,6 +60,9 @@ export function useDemote() {
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
       void qc.invalidateQueries({ queryKey: queryKeys.rebuilds.all });
     },
+    onError: (err) => {
+      toast.error("Demote failed", { description: err.message });
+    },
   });
 }
 
@@ -79,43 +82,25 @@ export function useTopicSync() {
   });
 }
 
-export interface RefreshResult {
-  repo: string;
-  discovery: {
-    discovered: number;
-    created: number;
-    closed: number;
-    skipped: number;
-  };
-  ciRefreshed: number;
+interface RefreshAccepted {
+  status: "started" | "already_running";
 }
 
-/** Refresh: fetch origin, discover branches, sync CI, cleanup stale topics. */
+/**
+ * Refresh: kicks off background refresh on the server.
+ * Returns 202 immediately — data updates stream in via WebSocket invalidation.
+ */
 export function useRefresh() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ repo }: { repo?: string }) =>
-      apiFetch<RefreshResult[]>("/api/refresh", {
+      apiFetch<RefreshAccepted>("/api/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo }),
       }),
-    onSuccess: (results) => {
-      void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
-      void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });
-      void qc.invalidateQueries({ queryKey: queryKeys.rebuilds.all });
-      void qc.invalidateQueries({ queryKey: queryKeys.conflicts.all });
-
-      let totalCreated = 0;
-      let totalClosed = 0;
-      for (const r of results) {
-        totalCreated += r.discovery.created;
-        totalClosed += r.discovery.closed;
-      }
-      if (totalCreated > 0 || totalClosed > 0) {
-        toast.success("Refresh complete", {
-          description: `${totalCreated} new topics discovered, ${totalClosed} closed`,
-        });
+    onSuccess: (result) => {
+      if (result.status === "already_running") {
+        toast.info("Refresh already in progress");
       }
     },
   });
@@ -147,6 +132,9 @@ export function useRebuild() {
       void qc.invalidateQueries({ queryKey: queryKeys.rebuilds.all });
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
       void qc.invalidateQueries({ queryKey: queryKeys.conflicts.all });
+    },
+    onError: (err) => {
+      toast.error("Rebuild failed", { description: err.message });
     },
   });
 }
@@ -189,6 +177,9 @@ export function useCreatePr() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
     },
+    onError: (err) => {
+      toast.error("Failed to create PR", { description: err.message });
+    },
   });
 }
 
@@ -209,6 +200,9 @@ export function useMergePr() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
+    },
+    onError: (err) => {
+      toast.error("Failed to merge PR", { description: err.message });
     },
   });
 }

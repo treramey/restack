@@ -14,10 +14,9 @@ const WS_OPEN = 1;
 type WsClient = { send: (data: string) => void; readyState: number };
 const wsClients = new Set<WsClient>();
 
-export type WsEvent = {
-  type: "invalidate";
-  queryKeys: string[][];
-};
+export type WsEvent =
+  | { type: "invalidate"; queryKeys: string[][] }
+  | { type: "refreshStatus"; status: "running" | "done" | "error"; error?: string };
 
 function broadcast(event: WsEvent) {
   const data = JSON.stringify(event);
@@ -214,12 +213,26 @@ function createEnvRoutes() {
   return new Hono()
     .get("/", async (c) => {
       const repo = c.req.query("repo");
-      const args = ["env", "list"];
-      if (repo) args.push("--repo", repo);
 
       try {
-        const result = await callCli(args);
-        return c.json(result);
+        if (repo) {
+          const result = await callCli(["env", "list", "--repo", repo]);
+          return c.json(result);
+        }
+        // No repo param: aggregate envs across all repos
+        const repos = await callCli(["repo", "list"]);
+        if (!Array.isArray(repos)) return c.json([]);
+        const all = await Promise.all(
+          repos.map(async (r: { id: string }) => {
+            try {
+              const envs = await callCli(["env", "list", "--repo", r.id]);
+              return Array.isArray(envs) ? envs : [];
+            } catch {
+              return [];
+            }
+          }),
+        );
+        return c.json(all.flat());
       } catch (err) {
         return handleCliError(c, err);
       }
@@ -391,6 +404,32 @@ function createRebuildRoutes() {
     });
 }
 
+/** In-flight refresh guard: prevents concurrent refreshes from stacking up. */
+let refreshInFlight = false;
+
+function runBackgroundRefresh(repo?: string) {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+
+  const args = ["refresh"];
+  if (repo) args.push("--repo", repo);
+
+  broadcast({ type: "refreshStatus", status: "running" });
+
+  callCli(args)
+    .then(() => {
+      broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"], ["conflicts"]);
+      broadcast({ type: "refreshStatus", status: "done" });
+    })
+    .catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      broadcast({ type: "refreshStatus", status: "error", error: message });
+    })
+    .finally(() => {
+      refreshInFlight = false;
+    });
+}
+
 function createRefreshRoutes() {
   return new Hono().post("/", async (c) => {
     let body: Record<string, unknown>;
@@ -402,19 +441,14 @@ function createRefreshRoutes() {
       return c.json({ error: "Invalid JSON body" }, 400);
     }
 
-    const args = ["refresh"];
     const repo = requireString(body, "repo");
-    if (repo) {
-      args.push("--repo", repo);
+
+    if (refreshInFlight) {
+      return c.json({ status: "already_running" }, 202);
     }
 
-    try {
-      const result = await callCli(args);
-      broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"], ["conflicts"]);
-      return c.json(result);
-    } catch (err) {
-      return handleCliError(c, err);
-    }
+    runBackgroundRefresh(repo);
+    return c.json({ status: "started" }, 202);
   });
 }
 
@@ -597,15 +631,9 @@ export async function startUiServer(config: UiServerConfig): Promise<void> {
     (info) => {
       console.log(`Restack UI: http://localhost:${info.port}`);
 
-      // Auto-refresh: discover new branches on startup
-      callCli(["refresh"])
-        .then(() => {
-          broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"], ["conflicts"]);
-          console.log("Auto-refresh complete");
-        })
-        .catch((err: unknown) => {
-          console.warn("Auto-refresh failed:", err instanceof Error ? err.message : String(err));
-        });
+      // Auto-refresh in background: UI loads cached DB data immediately,
+      // then updates stream in via WebSocket when refresh completes.
+      runBackgroundRefresh();
     }
   );
 

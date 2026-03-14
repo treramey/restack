@@ -1,10 +1,11 @@
 /**
  * TanStack Query hooks for restack API data.
  * All server state flows through these hooks — components never call fetch directly.
- * 
+ *
  * Sync strategy: No polling. Rely on:
- * - staleTime + refetchOnWindowFocus for user-initiated refresh
- * - Mutation invalidation for data changes
+ * - Persisted query cache (localStorage) for instant hydration on page load
+ * - WebSocket invalidation for real-time updates
+ * - Mutation invalidation for local data changes
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -104,10 +105,7 @@ export function useCiStatus(repoId: RepoId | null) {
 export function useContext() {
   return useQuery({
     queryKey: ["context"],
-    queryFn: async () => {
-      const res = await fetch("/api/context");
-      return res.json() as Promise<{ repoName: string | null }>;
-    },
+    queryFn: () => apiFetch<{ repoName: string | null }>("/api/context"),
     staleTime: Infinity,
   });
 }
