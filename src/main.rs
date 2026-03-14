@@ -1,10 +1,8 @@
 #![allow(dead_code)]
 
-use std::io;
 use std::path::{Path, PathBuf};
 
-use clap::{CommandFactory, Parser, Subcommand};
-use clap_complete::{generate, Shell};
+use clap::{Parser, Subcommand};
 
 mod commands;
 mod config;
