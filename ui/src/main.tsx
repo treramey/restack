@@ -9,7 +9,7 @@ import "./app.css";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: Infinity,
+      staleTime: 1000 * 60 * 5, // 5 min — refetch after this; WS invalidation handles real-time
       gcTime: 1000 * 60 * 60 * 24, // 24h — must be >= persister maxAge
       retry: 1,
       refetchOnWindowFocus: true,

@@ -418,7 +418,7 @@ function runBackgroundRefresh(repo?: string) {
 
   callCli(args)
     .then(() => {
-      broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"], ["conflicts"]);
+      broadcastInvalidate(["repos"], ["topics"], ["environments"], ["topicEnvironments"], ["rebuilds"], ["conflicts"]);
       broadcast({ type: "refreshStatus", status: "done" });
     })
     .catch((err: unknown) => {
