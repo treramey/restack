@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
 
 pub fn init_schema(conn: &Connection) -> Result<()> {
     let mut current_version: i32 =
@@ -156,6 +156,15 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         if has_auto_promote {
             conn.execute_batch("ALTER TABLE environments DROP COLUMN auto_promote;")?;
         }
+        conn.pragma_update(None, "user_version", 5)?;
+        current_version = 5;
+    }
+
+    if current_version <= 5 {
+        conn.execute_batch(
+            "ALTER TABLE repos ADD COLUMN refs_fingerprint TEXT;
+             ALTER TABLE repos ADD COLUMN last_refreshed_at TEXT;",
+        )?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 

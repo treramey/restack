@@ -33,12 +33,14 @@ pub fn create_repo(
         provider,
         base_branch: base_branch.to_string(),
         created_at: now,
+        refs_fingerprint: None,
+        last_refreshed_at: None,
     })
 }
 
 pub fn get_repo(conn: &Connection, id: &RepoId) -> Result<Repo> {
     conn.query_row(
-        "SELECT id, name, path, remote_url, provider, base_branch, created_at FROM repos WHERE id = ?1",
+        "SELECT id, name, path, remote_url, provider, base_branch, created_at, refs_fingerprint, last_refreshed_at FROM repos WHERE id = ?1",
         [id],
         |row| {
             Ok(RepoRow {
@@ -49,6 +51,8 @@ pub fn get_repo(conn: &Connection, id: &RepoId) -> Result<Repo> {
                 provider: row.get::<_, String>(4)?,
                 base_branch: row.get(5)?,
                 created_at: row.get::<_, String>(6)?,
+                refs_fingerprint: row.get(7)?,
+                last_refreshed_at: row.get(8)?,
             })
         },
     )
@@ -58,7 +62,7 @@ pub fn get_repo(conn: &Connection, id: &RepoId) -> Result<Repo> {
 
 pub fn get_repo_by_name(conn: &Connection, name: &str) -> Result<Option<Repo>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, path, remote_url, provider, base_branch, created_at FROM repos WHERE name = ?1",
+        "SELECT id, name, path, remote_url, provider, base_branch, created_at, refs_fingerprint, last_refreshed_at FROM repos WHERE name = ?1",
     )?;
 
     let mut rows = stmt.query([name])?;
@@ -72,6 +76,8 @@ pub fn get_repo_by_name(conn: &Connection, name: &str) -> Result<Option<Repo>> {
                 provider: row.get::<_, String>(4)?,
                 base_branch: row.get(5)?,
                 created_at: row.get::<_, String>(6)?,
+                refs_fingerprint: row.get(7)?,
+                last_refreshed_at: row.get(8)?,
             };
             Ok(Some(r.into_repo()?))
         }
@@ -81,7 +87,7 @@ pub fn get_repo_by_name(conn: &Connection, name: &str) -> Result<Option<Repo>> {
 
 pub fn get_repo_by_path(conn: &Connection, path: &str) -> Result<Option<Repo>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, path, remote_url, provider, base_branch, created_at FROM repos WHERE path = ?1",
+        "SELECT id, name, path, remote_url, provider, base_branch, created_at, refs_fingerprint, last_refreshed_at FROM repos WHERE path = ?1",
     )?;
 
     let mut rows = stmt.query([path])?;
@@ -95,6 +101,8 @@ pub fn get_repo_by_path(conn: &Connection, path: &str) -> Result<Option<Repo>> {
                 provider: row.get::<_, String>(4)?,
                 base_branch: row.get(5)?,
                 created_at: row.get::<_, String>(6)?,
+                refs_fingerprint: row.get(7)?,
+                last_refreshed_at: row.get(8)?,
             };
             Ok(Some(r.into_repo()?))
         }
@@ -104,7 +112,7 @@ pub fn get_repo_by_path(conn: &Connection, path: &str) -> Result<Option<Repo>> {
 
 pub fn list_repos(conn: &Connection) -> Result<Vec<Repo>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, path, remote_url, provider, base_branch, created_at FROM repos ORDER BY name",
+        "SELECT id, name, path, remote_url, provider, base_branch, created_at, refs_fingerprint, last_refreshed_at FROM repos ORDER BY name",
     )?;
 
     let rows = stmt.query_map([], |row| {
@@ -116,6 +124,8 @@ pub fn list_repos(conn: &Connection) -> Result<Vec<Repo>> {
             provider: row.get::<_, String>(4)?,
             base_branch: row.get(5)?,
             created_at: row.get::<_, String>(6)?,
+            refs_fingerprint: row.get(7)?,
+            last_refreshed_at: row.get(8)?,
         })
     })?;
 
@@ -143,6 +153,8 @@ struct RepoRow {
     provider: String,
     base_branch: String,
     created_at: String,
+    refs_fingerprint: Option<String>,
+    last_refreshed_at: Option<String>,
 }
 
 impl RepoRow {
@@ -165,6 +177,21 @@ impl RepoRow {
             provider,
             base_branch: self.base_branch,
             created_at,
+            refs_fingerprint: self.refs_fingerprint,
+            last_refreshed_at: self.last_refreshed_at
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                .map(|dt| dt.with_timezone(&Utc)),
         })
     }
+}
+
+pub fn update_repo_fingerprint(conn: &Connection, id: &RepoId, fingerprint: &str, refreshed_at: &str) -> Result<()> {
+    let affected = conn.execute(
+        "UPDATE repos SET refs_fingerprint = ?1, last_refreshed_at = ?2 WHERE id = ?3",
+        rusqlite::params![fingerprint, refreshed_at, id],
+    )?;
+    if affected == 0 {
+        return Err(RestackError::RepoNotFound(id.clone()));
+    }
+    Ok(())
 }

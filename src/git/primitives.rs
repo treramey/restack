@@ -660,6 +660,13 @@ pub fn create_branch_at_sha(repo: &Path, branch: &str, sha: &str) -> GitResult<(
     Ok(())
 }
 
+pub fn compute_refs_fingerprint(repo: &Path) -> GitResult<String> {
+    let output = run_git(repo, &["for-each-ref", "--format=%(objectname)", "--sort=refname", "refs/remotes/origin/"])?;
+    use sha2::{Sha256, Digest};
+    let hash = Sha256::digest(output.as_bytes());
+    Ok(format!("{hash:x}"))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

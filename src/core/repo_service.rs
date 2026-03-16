@@ -167,8 +167,10 @@ pub fn detect_repos(conn: &Connection, workspace_root: &Path) -> Result<DetectRe
 
     let mut found = Vec::new();
 
-    // Walk 1-2 levels deep
-    for entry in walk_git_dirs(workspace_root, 2) {
+    // Walk only immediate children of the workspace root.
+    // Nested repos (worktrees, org dirs like LAAIR_Services/) are
+    // excluded — use `repo add <path>` for those.
+    for entry in walk_git_dirs(workspace_root, 0) {
         let canonical = entry
             .canonicalize()
             .unwrap_or_else(|_| entry.clone())
@@ -198,6 +200,13 @@ pub fn detect_repos(conn: &Connection, workspace_root: &Path) -> Result<DetectRe
 
     for detected in &found {
         if detected.already_tracked {
+            skipped += 1;
+            continue;
+        }
+
+        // Double-check DB to avoid UNIQUE constraint violation when
+        // in-memory path comparison diverges from the stored path.
+        if repo_repo::get_repo_by_path(conn, &detected.path)?.is_some() {
             skipped += 1;
             continue;
         }

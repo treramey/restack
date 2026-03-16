@@ -95,6 +95,8 @@ pub struct Repo {
     pub provider: Provider,
     pub base_branch: String,
     pub created_at: DateTime<Utc>,
+    pub refs_fingerprint: Option<String>,
+    pub last_refreshed_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
