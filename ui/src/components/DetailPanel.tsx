@@ -17,7 +17,27 @@ import { STATUS_BADGE, CI_BADGE } from "../lib/badges.js";
 import { Badge } from "./Badge.js";
 import type { TopicStatus, CiStatus } from "../generated/types.js";
 
+/** Map an environment name to its CSS color variable value. */
+function getEnvColor(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes("dev")) return "var(--color-env-dev)";
+  if (lower.includes("stag")) return "var(--color-env-staging)";
+  if (lower.includes("prod")) return "var(--color-env-production)";
+  return "var(--color-accent)";
+}
+
 const COLLAPSED_HEIGHT = 40;
+
+/** Derive panel max height from viewport, updating on resize. */
+function usePanelMaxPx(): number {
+  const [maxPx, setMaxPx] = useState(() => Math.floor(window.innerHeight * PANEL_HEIGHT_MAX_VH));
+  useEffect(() => {
+    const update = () => setMaxPx(Math.floor(window.innerHeight * PANEL_HEIGHT_MAX_VH));
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return maxPx;
+}
 
 export function DetailPanel() {
   const selectedTopicId = useUIStore((s) => s.selectedTopicId);
@@ -25,6 +45,7 @@ export function DetailPanel() {
   const panelHeight = useUIStore((s) => s.panelHeight);
   const toggleDetailPanel = useUIStore((s) => s.toggleDetailPanel);
   const setPanelHeight = useUIStore((s) => s.setPanelHeight);
+  const panelMaxPx = usePanelMaxPx();
 
   const { data: topics } = useTopics();
   const { data: environments } = useEnvironments();
@@ -81,6 +102,7 @@ export function DetailPanel() {
   const nextEnv = highestEnv !== null
     ? repoEnvironments.find((e) => e.ordinal === highestEnv.ordinal + 1) ?? null
     : null;
+  const firstEnv = repoEnvironments[0] ?? null;
   const isUnassigned = topicEnvironments.length === 0;
   const isGraduated = selectedTopic?.status === "graduated";
   const isMutating = promote.isPending || demote.isPending || createPr.isPending || closeTopic.isPending;
@@ -152,7 +174,7 @@ export function DetailPanel() {
         newHeight = panelHeight - step;
         break;
       case "Home":
-        newHeight = Math.floor(window.innerHeight * PANEL_HEIGHT_MAX_VH);
+        newHeight = panelMaxPx;
         break;
       case "End":
         newHeight = PANEL_HEIGHT_MIN;
@@ -180,17 +202,19 @@ export function DetailPanel() {
           aria-orientation="horizontal"
           aria-valuenow={panelHeight}
           aria-valuemin={PANEL_HEIGHT_MIN}
-          aria-valuemax={Math.floor(window.innerHeight * PANEL_HEIGHT_MAX_VH)}
+          aria-valuemax={panelMaxPx}
           aria-label="Resize panel"
           tabIndex={0}
-          className="h-2 cursor-ns-resize bg-transparent hover:bg-accent-subtle active:bg-accent-muted focus-visible:bg-accent-subtle focus-visible:ring-2 focus-visible:ring-border-focus transition-colors shrink-0 touch-none select-none"
+          className="h-4 cursor-ns-resize bg-transparent hover:bg-accent-subtle active:bg-accent-muted focus-visible:bg-accent-subtle focus-visible:ring-2 focus-visible:ring-border-focus transition-colors shrink-0 touch-none select-none flex items-center justify-center"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
           onLostPointerCapture={handlePointerUp}
           onKeyDown={handleResizeKeyDown}
-        />
+        >
+          <div className="w-8 h-0.5 rounded-full bg-border" aria-hidden="true" />
+        </div>
       )}
 
       {/* Toggle bar */}
@@ -208,7 +232,7 @@ export function DetailPanel() {
             viewBox="0 0 12 12"
             fill="none"
             aria-hidden="true"
-            className={`transition-transform text-text-muted ${detailPanelOpen ? "rotate-180" : ""}`}
+            className={`transition-transform duration-150 text-text-muted ${detailPanelOpen ? "rotate-180" : ""}`}
           >
             <path
               d="M2 8L6 4L10 8"
@@ -222,7 +246,7 @@ export function DetailPanel() {
             {selectedTopic ? selectedTopic.branch : "No topic selected"}
           </span>
         </div>
-        <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-primary text-text-dim border border-border">
+        <kbd aria-hidden="true" className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-primary text-text-dim border border-border">
           D
         </kbd>
       </button>
@@ -235,6 +259,109 @@ export function DetailPanel() {
         >
           {selectedTopic ? (
             <dl className="h-full overflow-y-auto p-4 space-y-4 animate-fade-in">
+              <div className="space-y-1">
+                <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Actions</dt>
+                <dd className="flex items-center gap-2 flex-wrap">
+                  {/* Promote: in an env and there's a next env */}
+                  {highestEnv !== null && nextEnv !== null && !isGraduated && (
+                    <DetailActionButton
+                      label={`→ ${nextEnv.name}`}
+                      title={`Promote to ${nextEnv.name}`}
+                      disabled={isMutating}
+                      onClick={() => {
+                        if (selectedTopic && nextEnv) {
+                          promote.mutate({ topicId: selectedTopic.id, envId: nextEnv.id, repoId: selectedTopic.repoId });
+                        }
+                      }}
+                    />
+                  )}
+                  {/* Graduate: in last env and not graduated */}
+                  {isInLastEnv && !isGraduated && selectedTopic && selectedRepo && (
+                    <DetailActionButton
+                      label="Create PR →"
+                      title="Create PR to merge into base branch"
+                      disabled={isMutating}
+                      onClick={() => {
+                        if (selectedTopic && selectedRepo) {
+                          createPr.mutate(
+                            { repo: selectedTopic.repoId, head: selectedTopic.branch, base: selectedRepo.baseBranch, title: selectedTopic.branch },
+                            { onSuccess: (pr) => { if (pr.url) window.open(pr.url, "_blank"); } },
+                          );
+                        }
+                      }}
+                    />
+                  )}
+                  {/* Archive: move back to unassigned (remove from environment) */}
+                  {highestEnv !== null && !isGraduated && (
+                    <DetailActionButton
+                      label="Archive"
+                      title="Move back to unassigned"
+                      disabled={isMutating}
+                      variant="danger"
+                      onClick={() => {
+                        if (selectedTopic && highestEnv) {
+                          demote.mutate({ topicId: selectedTopic.id, envId: highestEnv.id, repoId: selectedTopic.repoId });
+                        }
+                      }}
+                    />
+                  )}
+                  {/* Promote to first env: unassigned and not graduated */}
+                  {isUnassigned && !isGraduated && firstEnv !== null && selectedTopic && (
+                    <DetailActionButton
+                      label={`→ ${firstEnv.name}`}
+                      title={`Promote to ${firstEnv.name}`}
+                      disabled={isMutating}
+                      onClick={() => {
+                        if (selectedTopic && firstEnv) {
+                          promote.mutate({ topicId: selectedTopic.id, envId: firstEnv.id, repoId: selectedTopic.repoId });
+                        }
+                      }}
+                    />
+                  )}
+                  {/* Close: delete branch on local and origin */}
+                  {isUnassigned && !isGraduated && selectedTopic && (
+                    <DetailActionButton
+                      label="Close"
+                      title="Delete branch from local and origin"
+                      disabled={isMutating}
+                      variant="danger"
+                      onClick={() => setShowCloseConfirm(true)}
+                    />
+                  )}
+                  {/* Clean up branch: graduated and unassigned */}
+                  {isUnassigned && isGraduated && selectedTopic && (
+                    <DetailActionButton
+                      label="Clean up branch"
+                      title="Delete branch (already merged)"
+                      disabled={isMutating}
+                      onClick={() => {
+                        if (selectedTopic) {
+                          closeTopic.mutate({ topicId: selectedTopic.id, repoId: selectedTopic.repoId });
+                        }
+                      }}
+                    />
+                  )}
+                </dd>
+              </div>
+
+              {/* Inline close confirmation */}
+              {showCloseConfirm && selectedTopic && (
+                <CloseConfirmInline
+                  branch={selectedTopic.branch}
+                  closeInput={closeInput}
+                  disabled={isMutating}
+                  onInputChange={setCloseInput}
+                  onConfirm={() => {
+                    if (selectedTopic) {
+                      closeTopic.mutate({ topicId: selectedTopic.id, repoId: selectedTopic.repoId });
+                      setShowCloseConfirm(false);
+                      setCloseInput("");
+                    }
+                  }}
+                  onCancel={() => { setShowCloseConfirm(false); setCloseInput(""); }}
+                />
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Branch</dt>
@@ -266,7 +393,12 @@ export function DetailPanel() {
                         .map((env) => (
                           <span
                             key={env.id}
-                            className="text-xs font-mono px-2 py-1 rounded bg-accent-subtle text-accent border border-accent/40"
+                            className="text-xs font-mono px-2 py-1 rounded border"
+                            style={{
+                              color: getEnvColor(env.name),
+                              borderColor: `color-mix(in srgb, ${getEnvColor(env.name)} 40%, transparent)`,
+                              backgroundColor: `color-mix(in srgb, ${getEnvColor(env.name)} 10%, transparent)`,
+                            }}
                           >
                             {env.name}
                             {env.branch !== env.name && (
@@ -326,117 +458,11 @@ export function DetailPanel() {
                   </dd>
                 </div>
               )}
-
-              <div className="space-y-1 pt-2 border-t border-border/50">
-                <dt className="text-[10px] font-mono text-text-dim uppercase tracking-wider">Actions</dt>
-                <dd className="flex items-center gap-2 flex-wrap">
-                  {/* Promote: in an env and there's a next env */}
-                  {highestEnv !== null && nextEnv !== null && !isGraduated && (
-                    <DetailActionButton
-                      label={`→ ${nextEnv.name}`}
-                      title={`Promote to ${nextEnv.name}`}
-                      disabled={isMutating}
-                      onClick={() => {
-                        if (selectedTopic && nextEnv) {
-                          promote.mutate({ topicId: selectedTopic.id, envId: nextEnv.id, repoId: selectedTopic.repoId });
-                        }
-                      }}
-                    />
-                  )}
-                  {/* Graduate: in last env and not graduated */}
-                  {isInLastEnv && !isGraduated && selectedTopic && selectedRepo && (
-                    <DetailActionButton
-                      label="Graduate →"
-                      title="Create PR to merge into base branch"
-                      disabled={isMutating}
-                      onClick={() => {
-                        if (selectedTopic && selectedRepo) {
-                          createPr.mutate(
-                            { repo: selectedTopic.repoId, head: selectedTopic.branch, base: selectedRepo.baseBranch, title: selectedTopic.branch },
-                            { onSuccess: (pr) => { if (pr.url) window.open(pr.url, "_blank"); } },
-                          );
-                        }
-                      }}
-                    />
-                  )}
-                  {/* Archive/Demote: in any env and not graduated */}
-                  {highestEnv !== null && !isGraduated && (
-                    <DetailActionButton
-                      label="Archive"
-                      title="Remove from environment"
-                      disabled={isMutating}
-                      variant="danger"
-                      onClick={() => {
-                        if (selectedTopic && highestEnv) {
-                          demote.mutate({ topicId: selectedTopic.id, envId: highestEnv.id, repoId: selectedTopic.repoId });
-                        }
-                      }}
-                    />
-                  )}
-                  {/* Create PR: no PR yet */}
-                  {selectedTopic && selectedRepo && !selectedTopic.prUrl && (
-                    <DetailActionButton
-                      label="Create PR"
-                      title="Create a pull request for this branch"
-                      disabled={isMutating}
-                      onClick={() => {
-                        if (selectedTopic && selectedRepo) {
-                          createPr.mutate(
-                            { repo: selectedTopic.repoId, head: selectedTopic.branch, base: selectedRepo.baseBranch, title: selectedTopic.branch },
-                            { onSuccess: (pr) => { if (pr.url) window.open(pr.url, "_blank"); } },
-                          );
-                        }
-                      }}
-                    />
-                  )}
-                  {/* Close: unassigned and not graduated */}
-                  {isUnassigned && !isGraduated && selectedTopic && (
-                    <DetailActionButton
-                      label="Close"
-                      title="Delete branch from origin and local"
-                      disabled={isMutating}
-                      variant="danger"
-                      onClick={() => setShowCloseConfirm(true)}
-                    />
-                  )}
-                  {/* Clean up branch: graduated and unassigned */}
-                  {isUnassigned && isGraduated && selectedTopic && (
-                    <DetailActionButton
-                      label="Clean up branch"
-                      title="Delete branch (already merged)"
-                      disabled={isMutating}
-                      onClick={() => {
-                        if (selectedTopic) {
-                          closeTopic.mutate({ topicId: selectedTopic.id, repoId: selectedTopic.repoId });
-                        }
-                      }}
-                    />
-                  )}
-                </dd>
-              </div>
-
-              {/* Inline close confirmation */}
-              {showCloseConfirm && selectedTopic && (
-                <CloseConfirmInline
-                  branch={selectedTopic.branch}
-                  closeInput={closeInput}
-                  disabled={isMutating}
-                  onInputChange={setCloseInput}
-                  onConfirm={() => {
-                    if (selectedTopic) {
-                      closeTopic.mutate({ topicId: selectedTopic.id, repoId: selectedTopic.repoId });
-                      setShowCloseConfirm(false);
-                      setCloseInput("");
-                    }
-                  }}
-                  onCancel={() => { setShowCloseConfirm(false); setCloseInput(""); }}
-                />
-              )}
             </dl>
           ) : (
             <div className="h-full flex flex-col items-center justify-center gap-1 animate-fade-in">
               <span className="text-text-muted text-sm font-mono">No topic selected</span>
-              <span className="text-text-dim text-xs font-mono">Click a card or press <kbd className="px-1 py-0.5 rounded bg-surface-primary border border-border text-[10px]">Enter</kbd> to inspect</span>
+              <span className="text-text-dim text-xs font-mono">Click a card or press <kbd aria-hidden="true" className="px-1 py-0.5 rounded bg-surface-primary border border-border text-[10px]">Enter</kbd> to inspect</span>
             </div>
           )}
         </div>
@@ -472,15 +498,14 @@ function CloseConfirmInline({
         onCancel();
         return;
       }
-      if (e.key !== "Tab") return;
+      if (e.key !== "Tab" || !container) return;
 
-      const focusable = container!.querySelectorAll<HTMLElement>(
+      const focusable = container.querySelectorAll<HTMLElement>(
         'input, button, [tabindex]:not([tabindex="-1"])',
       );
-      if (focusable.length === 0) return;
-
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) return;
 
       if (e.shiftKey) {
         if (document.activeElement === first) {
@@ -522,7 +547,7 @@ function CloseConfirmInline({
         <button
           type="button"
           onClick={onCancel}
-          className="text-[10px] font-mono px-2 py-1 min-h-[28px] inline-flex items-center rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary transition-colors cursor-pointer"
+          className="text-[10px] font-mono px-2.5 py-1.5 min-h-[36px] inline-flex items-center rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary transition-colors cursor-pointer"
         >
           Cancel
         </button>
@@ -530,7 +555,7 @@ function CloseConfirmInline({
           type="button"
           disabled={closeInput !== branch || disabled}
           onClick={onConfirm}
-          className="text-[10px] font-mono px-2 py-1 min-h-[28px] inline-flex items-center rounded border border-status-conflict/50 text-status-conflict hover:bg-status-conflict/10 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+          className="text-[10px] font-mono px-2.5 py-1.5 min-h-[36px] inline-flex items-center rounded border border-status-conflict/50 text-status-conflict hover:bg-status-conflict/10 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
         >
           Delete branch
         </button>
@@ -559,7 +584,7 @@ function DetailActionButton({
       disabled={disabled}
       onClick={onClick}
       className={`
-        text-[10px] font-mono px-2 py-1 min-h-[28px] inline-flex items-center rounded border cursor-pointer
+        text-[10px] font-mono px-2.5 py-1.5 min-h-[36px] inline-flex items-center rounded border cursor-pointer
         transition-colors disabled:opacity-40 disabled:cursor-not-allowed
         ${
           variant === "danger"

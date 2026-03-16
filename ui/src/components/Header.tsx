@@ -33,6 +33,15 @@ export function Header() {
     }
   }, [context, repos, selectedRepoId, setSelectedRepoId]);
 
+  // Kanban requires a specific repo — auto-select first if "All repos" is active
+  useEffect(() => {
+    if (viewMode === "kanban" && selectedRepoId === null && repos && repos.length > 0) {
+      setSelectedRepoId(repos[0]!.id);
+    }
+  }, [viewMode, selectedRepoId, repos, setSelectedRepoId]);
+
+  const showAllReposOption = viewMode !== "kanban";
+
   const handleRepoChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     setSelectedRepoId(value === "" ? null : isRepoId(value) ? value : null);
@@ -61,7 +70,7 @@ export function Header() {
         aria-label="Filter by repository"
         className="h-9 px-2 text-[13px] font-mono bg-surface-primary text-text-primary border border-border rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        <option value="">All repos</option>
+        {showAllReposOption && <option value="">All repos</option>}
         {repos?.map((repo) => (
           <option key={repo.id} value={repo.id}>
             {repo.name}
@@ -158,7 +167,7 @@ function ViewTabs({ viewMode, onChangeView }: { viewMode: ViewMode; onChangeView
         >
           <span className="flex items-center gap-1.5">
             {label}
-            <kbd className="hidden md:inline-flex text-[10px] font-mono px-1 py-0.5 rounded bg-surface-primary text-text-dim">
+            <kbd aria-hidden="true" className="hidden md:inline-flex text-[10px] font-mono px-1 py-0.5 rounded bg-surface-primary text-text-dim">
               {key}
             </kbd>
           </span>
@@ -181,7 +190,7 @@ function RefreshButton() {
       disabled={isRunning}
       onClick={() => refresh.mutate({ repo: selectedRepoId ?? undefined })}
       className={`
-        text-[10px] font-mono px-2 py-1 min-h-[28px] inline-flex items-center gap-1.5
+        text-[10px] font-mono px-2.5 py-1.5 min-h-[36px] inline-flex items-center gap-1.5
         rounded border transition-colors cursor-pointer
         focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus
         disabled:cursor-not-allowed

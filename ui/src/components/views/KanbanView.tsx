@@ -89,13 +89,6 @@ function latestRebuild(
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
 }
 
-function conflictsForTopic(
-  topicId: TopicId,
-  conflicts: Conflict[],
-): Conflict[] {
-  return conflicts.filter((c) => c.topicId === topicId && !c.resolved);
-}
-
 function unassignedTopics(
   topics: Topic[],
   topicEnvs: TopicEnvironment[],
@@ -142,12 +135,14 @@ function PromotionTrail({ allEnvs, topicEnvIds, highestEnvId }: PromotionTrailPr
             )}
             <div className="flex items-center gap-1">
               <div
-                title={env.name}
+                title={`${env.name}${present ? " (promoted)" : ""}`}
+                aria-label={`${env.name}: ${present ? "promoted" : "not promoted"}`}
                 className={`rounded-full shrink-0 ${isHighest ? "w-2 h-2" : "w-1.5 h-1.5"}`}
                 style={{
                   backgroundColor: present ? color : "transparent",
                   border: `1.5px solid ${color}`,
                   ...(isHighest ? { boxShadow: `0 0 0 2px color-mix(in srgb, ${color} 25%, transparent)` } : {}),
+                  ...(present ? {} : { borderStyle: "dashed" }),
                 }}
               />
               <span
@@ -266,17 +261,21 @@ export function KanbanView() {
     return map;
   }, [topicEnvs]);
 
-  // Env memberships for the selected topic (for ghost cards)
-  const selectedTopicEnvIds = useMemo(() => {
-    if (!selectedTopicId) return new Set<EnvId>();
-    return topicEnvMap.get(selectedTopicId) ?? new Set<EnvId>();
-  }, [selectedTopicId, topicEnvMap]);
-
-  // The selected topic object (for ghost cards)
-  const selectedTopic = useMemo(() => {
-    if (!selectedTopicId) return undefined;
-    return topics.find((t) => t.id === selectedTopicId);
-  }, [selectedTopicId, topics]);
+  // Pre-computed map: topicId -> unresolved Conflict[] (avoids O(n*m) per-card filter)
+  const topicConflictsMap = useMemo(() => {
+    const map = new Map<TopicId, Conflict[]>();
+    if (!conflicts) return map;
+    for (const c of conflicts) {
+      if (c.resolved) continue;
+      let list = map.get(c.topicId);
+      if (!list) {
+        list = [];
+        map.set(c.topicId, list);
+      }
+      list.push(c);
+    }
+    return map;
+  }, [conflicts]);
 
   // Build lane data — each topic appears only in its highest env
   const lanes: Lane[] = useMemo(() => {
@@ -350,7 +349,8 @@ export function KanbanView() {
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement
+        e.target instanceof HTMLSelectElement ||
+        (e.target instanceof HTMLElement && e.target.isContentEditable)
       ) {
         return;
       }
@@ -481,21 +481,13 @@ export function KanbanView() {
               topics={lane.topics}
               totalInEnv={lane.totalInEnv}
               lastRebuild={lane.lastRebuild}
-              conflicts={conflicts ?? []}
+              topicConflictsMap={topicConflictsMap}
               isCurrentLane={laneIndex === focusedLane}
               focusedCardIndex={laneIndex === focusedLane ? focusedCard : null}
               selectedTopicId={selectedTopicId}
               nextEnv={lane.env ? nextEnv(lane.env.id) : undefined}
               isMutating={isMutating}
               isLastEnvLane={laneIndex === lanes.length - 1 && !isUnassigned}
-              ghostTopic={
-                selectedTopic &&
-                lane.env &&
-                selectedTopicEnvIds.has(lane.env.id) &&
-                topicHighestEnv.get(selectedTopic.id) !== lane.env.id
-                  ? selectedTopic
-                  : undefined
-              }
               allEnvs={environments}
               topicEnvMap={topicEnvMap}
               topicHighestEnv={topicHighestEnv}
@@ -508,14 +500,14 @@ export function KanbanView() {
                 setSelectedTopicId(topic.id);
               }}
               onPromote={(topicId, repoId) => {
-                if (!lane.env) return;
+                if (!lane.env) {
+                  // Unassigned → promote to first environment
+                  const first = environments[0];
+                  if (first) promote.mutate({ topicId, envId: first.id, repoId });
+                  return;
+                }
                 const next = nextEnv(lane.env.id);
                 if (next) promote.mutate({ topicId, envId: next.id, repoId });
-              }}
-              onDemote={(topicId, repoId) => {
-                if (lane.env) {
-                  demote.mutate({ topicId, envId: lane.env.id, repoId });
-                }
               }}
               onRebuild={() => {
                 if (lane.env) rebuild.mutate({ envId: lane.env.id });
@@ -546,14 +538,13 @@ interface LaneColumnProps {
   topics: Topic[];
   totalInEnv: number;
   lastRebuild: Rebuild | undefined;
-  conflicts: Conflict[];
+  topicConflictsMap: Map<TopicId, Conflict[]>;
   isCurrentLane: boolean;
   focusedCardIndex: number | null;
   selectedTopicId: TopicId | null;
   nextEnv: Environment | undefined;
   isMutating: boolean;
   isLastEnvLane: boolean;
-  ghostTopic: Topic | undefined;
   allEnvs: Environment[];
   topicEnvMap: Map<TopicId, Set<EnvId>>;
   topicHighestEnv: Map<TopicId, EnvId>;
@@ -562,7 +553,6 @@ interface LaneColumnProps {
   onScroll: (envId: string) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
   onPromote: (topicId: TopicId, repoId: string) => void;
-  onDemote: (topicId: TopicId, repoId: string) => void;
   onRebuild: () => void;
   onGraduate: (topic: Topic) => void;
   onClose: (topicId: TopicId, repoId: string) => void;
@@ -574,14 +564,13 @@ function LaneColumn({
   topics,
   totalInEnv,
   lastRebuild,
-  conflicts,
+  topicConflictsMap,
   isCurrentLane,
   focusedCardIndex,
   selectedTopicId,
   nextEnv,
   isMutating,
   isLastEnvLane,
-  ghostTopic,
   allEnvs,
   topicEnvMap,
   topicHighestEnv,
@@ -590,7 +579,6 @@ function LaneColumn({
   onScroll,
   onSelect,
   onPromote,
-  onDemote,
   onRebuild,
   onGraduate,
   onClose,
@@ -636,7 +624,7 @@ function LaneColumn({
                 type="button"
                 disabled={isMutating}
                 onClick={onRebuild}
-                className="text-[10px] font-mono px-2 py-1 min-h-[28px] inline-flex items-center rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                className="text-[10px] font-mono px-2.5 py-1.5 min-h-[36px] inline-flex items-center rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 title={`Rebuild ${header.name}`}
               >
                 Rebuild
@@ -669,7 +657,7 @@ function LaneColumn({
           {isUnassigned ? (
             <UnassignedLaneContent
               topics={topics}
-              conflicts={conflicts}
+              topicConflictsMap={topicConflictsMap}
               isCurrentLane={isCurrentLane}
               focusedCardIndex={focusedCardIndex}
               selectedTopicId={selectedTopicId}
@@ -677,8 +665,10 @@ function LaneColumn({
               allEnvs={allEnvs}
               topicEnvMap={topicEnvMap}
               topicHighestEnv={topicHighestEnv}
+              firstEnv={allEnvs[0]}
               onCardRef={onCardRef}
               onSelect={onSelect}
+              onPromote={onPromote}
               onClose={onClose}
             />
           ) : (
@@ -687,20 +677,17 @@ function LaneColumn({
               role="list"
               aria-label={`${header.name} topics`}
             >
-              {topics.length === 0 && !ghostTopic ? (
+              {topics.length === 0 ? (
                 <div className="text-text-dim text-xs font-mono text-center py-8 opacity-50">
                   No topics promoted here yet
                 </div>
               ) : (
                 <>
-                  {ghostTopic && (
-                    <GhostCard branch={ghostTopic.branch} />
-                  )}
                   {topics.map((topic, cardIndex) => (
                     <TopicCard
                       key={topic.id}
                       topic={topic}
-                      conflicts={conflictsForTopic(topic.id, conflicts)}
+                      conflicts={topicConflictsMap.get(topic.id) ?? []}
                       cardIndex={cardIndex}
                       isFocused={
                         isCurrentLane && focusedCardIndex === cardIndex
@@ -716,9 +703,7 @@ function LaneColumn({
                       onRef={onCardRef}
                       onSelect={onSelect}
                       onPromote={onPromote}
-                      onDemote={onDemote}
                       onGraduate={onGraduate}
-                      onClose={onClose}
                     />
                   ))}
                 </>
@@ -735,7 +720,7 @@ function LaneColumn({
 
 interface UnassignedLaneContentProps {
   topics: Topic[];
-  conflicts: Conflict[];
+  topicConflictsMap: Map<TopicId, Conflict[]>;
   isCurrentLane: boolean;
   focusedCardIndex: number | null;
   selectedTopicId: TopicId | null;
@@ -743,23 +728,27 @@ interface UnassignedLaneContentProps {
   allEnvs: Environment[];
   topicEnvMap: Map<TopicId, Set<EnvId>>;
   topicHighestEnv: Map<TopicId, EnvId>;
+  firstEnv: Environment | undefined;
   onCardRef: (id: TopicId, el: HTMLDivElement | null) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
+  onPromote: (topicId: TopicId, repoId: string) => void;
   onClose: (topicId: TopicId, repoId: string) => void;
 }
 
 function UnassignedLaneContent({
   topics,
-  conflicts,
+  topicConflictsMap,
   isCurrentLane,
   focusedCardIndex,
   selectedTopicId,
   isMutating,
   allEnvs,
   topicEnvMap,
+  firstEnv,
   topicHighestEnv,
   onCardRef,
   onSelect,
+  onPromote,
   onClose,
 }: UnassignedLaneContentProps) {
   const [graduatedExpanded, setGraduatedExpanded] = useState(false);
@@ -781,11 +770,11 @@ function UnassignedLaneContent({
             <TopicCard
               key={topic.id}
               topic={topic}
-              conflicts={conflictsForTopic(topic.id, conflicts)}
+              conflicts={topicConflictsMap.get(topic.id) ?? []}
               cardIndex={activeIndices[i]!}
               isFocused={isCurrentLane && focusedCardIndex === activeIndices[i]}
               isSelected={selectedTopicId === topic.id}
-              nextEnv={undefined}
+              nextEnv={firstEnv}
               isUnassignedLane={true}
               isLastEnvLane={false}
               isMutating={isMutating}
@@ -794,10 +783,8 @@ function UnassignedLaneContent({
               highestEnvId={topicHighestEnv.get(topic.id) ?? null}
               onRef={onCardRef}
               onSelect={onSelect}
-              onPromote={() => {}}
-              onDemote={() => {}}
+              onPromote={onPromote}
               onGraduate={() => {}}
-              onClose={onClose}
             />
           ))}
         </div>
@@ -904,7 +891,7 @@ function CompactGraduatedCard({
           title="Delete branch (already merged)"
           disabled={isMutating}
           onClick={(e) => { e.stopPropagation(); onClose(topic.id, topic.repoId); }}
-          className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-border/40 text-text-dim hover:text-text-muted hover:bg-surface-secondary transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+          className="text-[10px] font-mono px-2 py-1 min-h-[36px] rounded border border-border/40 text-text-dim hover:text-text-muted hover:bg-surface-secondary transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0 inline-flex items-center"
         >
           Clean up
         </button>
@@ -931,9 +918,7 @@ interface TopicCardProps {
   onRef: (id: TopicId, el: HTMLDivElement | null) => void;
   onSelect: (topic: Topic, cardIndex: number) => void;
   onPromote: (topicId: TopicId, repoId: string) => void;
-  onDemote: (topicId: TopicId, repoId: string) => void;
   onGraduate: (topic: Topic) => void;
-  onClose: (topicId: TopicId, repoId: string) => void;
 }
 
 function TopicCard({
@@ -952,13 +937,8 @@ function TopicCard({
   onRef,
   onSelect,
   onPromote,
-  onDemote,
   onGraduate,
-  onClose,
 }: TopicCardProps) {
-  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
-  const [closeInput, setCloseInput] = useState("");
-
   const handleRef = useCallback(
     (el: HTMLDivElement | null) => {
       onRef(topic.id, el);
@@ -1077,211 +1057,33 @@ function TopicCard({
             />
           )}
 
-          {/* Action buttons */}
-          <div
-            className="flex items-center gap-2 pt-1.5 border-t border-border/50"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
-          >
-            {nextEnv && !isGraduated && !isUnassignedLane && (
-              <ActionButton
-                label={`→ ${nextEnv.name}`}
-                title={`Promote to ${nextEnv.name}`}
-                disabled={isMutating}
-                onClick={() => onPromote(topic.id, topic.repoId)}
-                variant="primary"
-              />
-            )}
-            {isLastEnvLane && !isGraduated && (
-              <ActionButton
-                label="Graduate →"
-                title="Create PR to merge into master"
-                disabled={isMutating}
-                onClick={() => onGraduate(topic)}
-                variant="primary"
-              />
-            )}
-            {!isGraduated && !isUnassignedLane && (
-              <ActionButton
-                label="Archive"
-                title="Remove from environment"
-                disabled={isMutating}
-                onClick={() => onDemote(topic.id, topic.repoId)}
-                variant="danger"
-              />
-            )}
-            {isUnassignedLane && !isGraduated && (
-              <ActionButton
-                label="Close"
-                title="Delete branch from origin and local"
-                disabled={isMutating}
-                onClick={() => setShowCloseConfirm(true)}
-                variant="danger"
-              />
-            )}
-            {isUnassignedLane && isGraduated && (
-              <ActionButton
-                label="Clean up branch"
-                title="Delete branch (already merged into master)"
-                disabled={isMutating}
-                onClick={() => onClose(topic.id, topic.repoId)}
-              />
-            )}
-          </div>
-
-          {/* Close confirmation modal */}
-          {showCloseConfirm && (
-            <CloseConfirmDialog
-              branch={topic.branch}
-              closeInput={closeInput}
-              onInputChange={setCloseInput}
-              onConfirm={() => {
-                onClose(topic.id, topic.repoId);
-                setShowCloseConfirm(false);
-                setCloseInput("");
-              }}
-              onCancel={() => { setShowCloseConfirm(false); setCloseInput(""); }}
-            />
-          )}
+          {/* Forward action: promote to next env, or create PR in last env */}
+          {!isGraduated && (nextEnv || isLastEnvLane) ? (
+            <div
+              className="flex items-center gap-2 pt-1.5 border-t border-border/50"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              {nextEnv ? (
+                <ActionButton
+                  label={`→ ${nextEnv.name}`}
+                  title={`Promote to ${nextEnv.name}`}
+                  disabled={isMutating}
+                  onClick={() => onPromote(topic.id, topic.repoId)}
+                  variant="primary"
+                />
+              ) : (
+                <ActionButton
+                  label="Create PR →"
+                  title="Create PR to merge into base branch"
+                  disabled={isMutating}
+                  onClick={() => onGraduate(topic)}
+                  variant="primary"
+                />
+              )}
+            </div>
+          ) : null}
         </div>
-    </div>
-  );
-}
-
-// ============ Ghost Card ============
-
-function GhostCard({ branch }: { branch: string }) {
-  return (
-    <div role="listitem">
-      <div
-        aria-label={`${branch} (present in lower environment)`}
-        className="p-3 rounded border border-accent/40 bg-accent-subtle/10 border-dashed animate-ghost-pulse"
-      >
-        <div className="text-sm font-mono leading-tight truncate text-accent/70">
-          {branch}
-        </div>
-        <div className="flex items-center gap-1.5 mt-1">
-          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase text-accent/50">
-            ✓ present
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============ Close Confirm Dialog ============
-
-function CloseConfirmDialog({
-  branch,
-  closeInput,
-  onInputChange,
-  onConfirm,
-  onCancel,
-}: {
-  branch: string;
-  closeInput: string;
-  onInputChange: (value: string) => void;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // Focus trap: cycle through focusable elements within the dialog
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onCancel();
-        return;
-      }
-      if (e.key !== "Tab") return;
-
-      const focusable = dialog!.querySelectorAll<HTMLElement>(
-        'input, button, [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
-
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
-
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else {
-        if (document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    }
-
-    dialog.addEventListener("keydown", handleKeyDown);
-    return () => dialog.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 animate-backdrop"
-      onClick={(e) => { e.stopPropagation(); onCancel(); }}
-      onKeyDown={(e) => e.stopPropagation()}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="close-dialog-title"
-        aria-describedby="close-dialog-desc"
-        className="bg-surface-primary border border-border rounded-lg p-4 w-[400px] shadow-xl animate-scale-in"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 id="close-dialog-title" className="text-sm font-mono font-bold text-text-primary mb-2">
-          Delete branch?
-        </h3>
-        <p id="close-dialog-desc" className="text-xs font-mono text-text-muted mb-3">
-          This will delete <span className="text-status-conflict font-bold">{branch}</span> from
-          both origin and local. This cannot be undone.
-        </p>
-        <p id="close-dialog-input-hint" className="text-xs font-mono text-text-dim mb-2">
-          Type the branch name to confirm:
-        </p>
-        <input
-          type="text"
-          value={closeInput}
-          onChange={(e) => onInputChange(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === "Enter" && closeInput === branch) {
-              onConfirm();
-            }
-          }}
-          aria-labelledby="close-dialog-input-hint"
-          className="w-full px-2 py-1.5 rounded border border-border bg-bg-primary text-text-primary font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent mb-3"
-          placeholder={branch}
-          autoFocus
-        />
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="text-xs font-mono px-3 py-1.5 min-h-[32px] inline-flex items-center rounded border border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={closeInput !== branch}
-            onClick={onConfirm}
-            className="text-xs font-mono px-3 py-1.5 min-h-[32px] inline-flex items-center rounded border border-status-conflict/50 text-status-conflict hover:bg-status-conflict/10 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
-          >
-            Delete branch
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1317,7 +1119,7 @@ function ActionButton({
       disabled={disabled}
       onClick={onClick}
       className={`
-        text-[10px] font-mono px-2 py-1 min-h-[28px] inline-flex items-center rounded border cursor-pointer
+        text-[10px] font-mono px-2.5 py-1.5 min-h-[36px] inline-flex items-center rounded border cursor-pointer
         transition-colors disabled:opacity-40 disabled:cursor-not-allowed
         ${styles[variant]}
       `}

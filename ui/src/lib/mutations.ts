@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiFetch } from "./api.js";
 import { queryKeys } from "./queries.js";
+import { announce } from "./announce.js";
 import type {
   EnvId,
   TopicId,
@@ -37,9 +38,13 @@ export function usePromote() {
       void qc.invalidateQueries({ queryKey: queryKeys.conflicts.all });
 
       if (result.conflicts && result.conflicts.length > 0) {
+        const msg = `Merge conflict detected: ${result.conflicts.length} topic${result.conflicts.length > 1 ? "s" : ""} could not be merged.`;
         toast.error("Merge conflict detected", {
           description: `${result.conflicts.length} topic${result.conflicts.length > 1 ? "s" : ""} could not be merged and were removed from the environment.`,
         });
+        announce(msg);
+      } else {
+        announce("Topic promoted successfully");
       }
     },
   });
@@ -59,9 +64,11 @@ export function useDemote() {
       void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
       void qc.invalidateQueries({ queryKey: queryKeys.rebuilds.all });
+      announce("Topic removed from environment");
     },
     onError: (err) => {
       toast.error("Demote failed", { description: err.message });
+      announce(`Demote failed: ${err.message}`);
     },
   });
 }
@@ -132,9 +139,11 @@ export function useRebuild() {
       void qc.invalidateQueries({ queryKey: queryKeys.rebuilds.all });
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
       void qc.invalidateQueries({ queryKey: queryKeys.conflicts.all });
+      announce("Rebuild started");
     },
     onError: (err) => {
       toast.error("Rebuild failed", { description: err.message });
+      announce(`Rebuild failed: ${err.message}`);
     },
   });
 }
@@ -153,6 +162,7 @@ export function useCloseTopic() {
       toast.success("Topic closed", {
         description: `Branch ${result.branch} deleted from origin and local`,
       });
+      announce(`Topic closed: branch ${result.branch} deleted`);
     },
   });
 }
@@ -176,9 +186,11 @@ export function useCreatePr() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
+      announce("Pull request created");
     },
     onError: (err) => {
       toast.error("Failed to create PR", { description: err.message });
+      announce(`Failed to create pull request: ${err.message}`);
     },
   });
 }

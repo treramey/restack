@@ -184,7 +184,7 @@ export function ListView() {
   return (
     <div className="flex-1 flex flex-col bg-bg-primary overflow-hidden">
       <div className="flex-1 overflow-y-auto">
-        <table className="w-full border-collapse font-mono">
+        <table className="w-full border-collapse font-mono" aria-label="Topics">
           <thead className="sticky top-0 z-10 bg-bg-secondary">
             <tr className="border-b border-border">
               {columns.map((col) => (
@@ -265,7 +265,7 @@ export function ListView() {
                       {row.envNames.length > 0 ? (
                         row.envNames.map((name) => (
                           <span
-                            key={name}
+                            key={`${row.topic.id}-${name}`}
                             className="text-[9px] px-1.5 py-0.5 rounded bg-surface-secondary border border-border text-text-muted"
                           >
                             {name}

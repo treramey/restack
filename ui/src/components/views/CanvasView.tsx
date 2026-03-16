@@ -5,7 +5,7 @@
  * Color-coded by environment membership.
  */
 
-import { useMemo, useCallback, memo } from "react";
+import { useMemo, useCallback, useState, useEffect, memo } from "react";
 import {
   ReactFlow,
   Controls,
@@ -54,12 +54,14 @@ interface WorkspaceNodeData extends Record<string, unknown> {
 
 interface RepoNodeData extends Record<string, unknown> {
   repo: Repo;
+  onSelect: (repoId: RepoId) => void;
 }
 
 interface TopicNodeData extends Record<string, unknown> {
   topic: Topic;
   envColor: string;
   envLabel: string;
+  onSelect: (topicId: TopicId) => void;
 }
 
 type WorkspaceNode = Node<WorkspaceNodeData, "workspace">;
@@ -121,7 +123,14 @@ function layoutElements(
   if (nodes.length === 0) return { nodes: [], edges: [] };
 
   const g = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "TB", nodesep: 32, ranksep: 56, marginx: 24, marginy: 24 });
+  const compact = typeof window !== "undefined" && window.innerWidth < 768;
+  g.setGraph({
+    rankdir: "TB",
+    nodesep: compact ? 16 : 32,
+    ranksep: compact ? 36 : 56,
+    marginx: compact ? 12 : 24,
+    marginy: compact ? 12 : 24,
+  });
 
   for (const node of nodes) {
     const w =
@@ -183,7 +192,7 @@ const WorkspaceNodeComponent = memo(function WorkspaceNodeComponent({
 const RepoNodeComponent = memo(function RepoNodeComponent({
   data,
 }: NodeProps<RepoNode>) {
-  const { repo } = data;
+  const { repo, onSelect } = data;
   const badge = PROVIDER_LABELS[repo.provider] ?? "";
 
   return (
@@ -192,8 +201,9 @@ const RepoNodeComponent = memo(function RepoNodeComponent({
       <div
         role="button"
         tabIndex={0}
-        aria-label={repo.name}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.currentTarget.click(); } }}
+        aria-label={`Repository: ${repo.name}`}
+        onClick={() => onSelect(repo.id)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(repo.id); } }}
         className="flex items-center gap-2 border border-border bg-surface-primary px-3 py-2 rounded hover:border-border-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
         style={{ width: REPO_NODE_WIDTH, height: REPO_NODE_HEIGHT }}
       >
@@ -219,7 +229,7 @@ const RepoNodeComponent = memo(function RepoNodeComponent({
 const TopicNodeComponent = memo(function TopicNodeComponent({
   data,
 }: NodeProps<TopicNode>) {
-  const { topic, envColor, envLabel } = data;
+  const { topic, envColor, envLabel, onSelect } = data;
 
   return (
     <>
@@ -227,8 +237,9 @@ const TopicNodeComponent = memo(function TopicNodeComponent({
       <div
         role="button"
         tabIndex={0}
-        aria-label={topic.branch}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.currentTarget.click(); } }}
+        aria-label={`Topic: ${topic.branch} (${envLabel})`}
+        onClick={() => onSelect(topic.id)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(topic.id); } }}
         className="flex items-center gap-2 border bg-surface-primary px-3 py-2 rounded cursor-pointer hover:border-border-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
         style={{
           width: TOPIC_NODE_WIDTH,
@@ -269,8 +280,8 @@ export function CanvasView() {
   const setSelectedRepoId = useUIStore((s) => s.setSelectedRepoId);
   const setSelectedTopicId = useUIStore((s) => s.setSelectedTopicId);
 
-  const { data: repos } = useRepos();
-  const { data: topics } = useTopics();
+  const { data: repos, isLoading: reposLoading } = useRepos();
+  const { data: topics, isLoading: topicsLoading } = useTopics();
   const { data: environments } = useEnvironments();
   const { data: topicEnvs } = useTopicEnvironments();
 
@@ -307,7 +318,7 @@ export function CanvasView() {
         id: repo.id,
         type: "repo",
         position: { x: 0, y: 0 },
-        data: { repo },
+        data: { repo, onSelect: setSelectedRepoId },
       });
       allEdges.push({
         id: `ws-${repo.id}`,
@@ -331,7 +342,7 @@ export function CanvasView() {
           id: topic.id,
           type: "topic",
           position: { x: 0, y: 0 },
-          data: { topic, envColor: color, envLabel: label },
+          data: { topic, envColor: color, envLabel: label, onSelect: setSelectedTopicId },
         });
         allEdges.push({
           id: `repo-${repo.id}-${topic.id}`,
@@ -344,7 +355,7 @@ export function CanvasView() {
     }
 
     return layoutElements(allNodes, allEdges);
-  }, [repos, topics, topicEnvs, envMap]);
+  }, [repos, topics, topicEnvs, envMap, setSelectedRepoId, setSelectedTopicId]);
 
   const handleNodeClick: NodeMouseHandler<CanvasNode> = useCallback(
     (_, node) => {
@@ -357,18 +368,66 @@ export function CanvasView() {
     [setSelectedRepoId, setSelectedTopicId],
   );
 
-  if (!repos || repos.length === 0) {
+  if (reposLoading || topicsLoading) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-text-muted p-8">
-        <p className="font-mono uppercase tracking-wider text-sm">No repos tracked</p>
-        <p className="text-text-dim text-xs font-mono">Run `restack repo add` to begin</p>
+      <div className="flex-1 flex items-center justify-center text-text-muted p-8">
+        <p className="font-mono uppercase tracking-wider text-sm animate-ghost-pulse">Loading graph…</p>
       </div>
     );
   }
 
+  if (!repos || repos.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-text-muted p-8">
+        {/* Graph placeholder icon */}
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="text-text-dim" aria-hidden="true">
+          <circle cx="24" cy="8" r="4" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="12" cy="28" r="4" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="36" cy="28" r="4" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="20" cy="44" r="3" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="36" cy="44" r="3" stroke="currentColor" strokeWidth="1.5" />
+          <line x1="24" y1="12" x2="12" y2="24" stroke="currentColor" strokeWidth="1.2" />
+          <line x1="24" y1="12" x2="36" y2="24" stroke="currentColor" strokeWidth="1.2" />
+          <line x1="36" y1="32" x2="36" y2="41" stroke="currentColor" strokeWidth="1.2" />
+          <line x1="12" y1="32" x2="20" y2="41" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+        <p className="font-mono uppercase tracking-wider text-sm">No repos tracked</p>
+        <p className="text-text-dim text-xs font-mono max-w-xs text-center">
+          Your repo &rarr; topic dependency graph will appear here.
+          Run <code className="text-text-muted">restack repo add</code> to begin.
+        </p>
+      </div>
+    );
+  }
+
+  const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+  const [hintDismissed, setHintDismissed] = useState(() =>
+    typeof sessionStorage !== "undefined" && sessionStorage.getItem("canvas-hint-dismissed") === "1",
+  );
+
+  const dismissHint = useCallback(() => {
+    setHintDismissed(true);
+    sessionStorage.setItem("canvas-hint-dismissed", "1");
+  }, []);
+
+  // Auto-dismiss after first interaction
+  useEffect(() => {
+    if (hintDismissed || !isTouch) return;
+    const dismiss = () => dismissHint();
+    window.addEventListener("touchmove", dismiss, { once: true });
+    return () => window.removeEventListener("touchmove", dismiss);
+  }, [hintDismissed, isTouch, dismissHint]);
+
   return (
-    <div className="w-full h-full min-h-0">
+    <div className="w-full h-full min-h-0" role="region" aria-label="Repository dependency graph">
+      {isTouch && !hintDismissed && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded bg-surface-primary border border-border text-text-dim text-[11px] font-mono animate-fade-in">
+          Pinch to zoom · drag to pan · tap a node to select
+          <button onClick={dismissHint} className="ml-2 text-text-muted hover:text-text-primary" aria-label="Dismiss hint">&times;</button>
+        </div>
+      )}
       <ReactFlow
+        aria-label="Repository dependency graph"
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -386,7 +445,7 @@ export function CanvasView() {
         proOptions={{ hideAttribution: true }}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-border)" />
-        <Controls showInteractive={false} />
+        <Controls showInteractive={false} aria-label="Graph zoom controls" />
       </ReactFlow>
     </div>
   );
