@@ -106,7 +106,7 @@ function createRepoRoutes() {
   return new Hono()
     .get("/", async (c) => {
       try {
-        const result = await callCli(["repo", "list"]);
+        const result = await callCli(["list"]);
         return c.json(result);
       } catch (err) {
         return handleCliError(c, err);
@@ -116,7 +116,7 @@ function createRepoRoutes() {
       const id = c.req.param("id");
 
       try {
-        const result = await callCli(["repo", "remove", id]);
+        const result = await callCli(["remove", id]);
         return c.json(result);
       } catch (err) {
         return handleCliError(c, err);
@@ -216,16 +216,16 @@ function createEnvRoutes() {
 
       try {
         if (repo) {
-          const result = await callCli(["env", "list", "--repo", repo]);
+          const result = await callCli(["integration", "list", "--repo", repo]);
           return c.json(result);
         }
         // No repo param: aggregate envs across all repos
-        const repos = await callCli(["repo", "list"]);
+        const repos = await callCli(["list"]);
         if (!Array.isArray(repos)) return c.json([]);
         const all = await Promise.all(
           repos.map(async (r: { id: string }) => {
             try {
-              const envs = await callCli(["env", "list", "--repo", r.id]);
+              const envs = await callCli(["integration", "list", "--repo", r.id]);
               return Array.isArray(envs) ? envs : [];
             } catch {
               return [];
@@ -255,7 +255,7 @@ function createEnvRoutes() {
       if (!branch) return c.json({ error: "branch is required" }, 400);
       if (!repo) return c.json({ error: "repo is required" }, 400);
 
-      const args = ["env", "add", "--branch", branch, "--repo", repo, name];
+      const args = ["integration", "add", "--branch", branch, "--repo", repo, name];
       const ordinal = requireNumber(body, "ordinal");
       if (ordinal !== undefined) args.push("--ordinal", String(ordinal));
       const autoPromote = requireBool(body, "autoPromote");
@@ -273,7 +273,7 @@ function createEnvRoutes() {
       const name = c.req.param("name");
 
       try {
-        const result = await callCli(["env", "status", name]);
+        const result = await callCli(["integration", "status", name]);
         return c.json(result);
       } catch (err) {
         return handleCliError(c, err);
@@ -307,7 +307,7 @@ function createPromoteRoutes() {
       if (!repoId) return c.json({ error: "repoId is required" }, 400);
 
       try {
-        const envResult = await callCli(["env", "list", "--repo", repoId]);
+        const envResult = await callCli(["integration", "list", "--repo", repoId]);
         if (!Array.isArray(envResult)) {
           return c.json({ error: "Invalid environment list response" }, 500);
         }
@@ -317,7 +317,7 @@ function createPromoteRoutes() {
         if (!env) return c.json({ error: "Environment not found" }, 404);
 
         const result = await callCli([
-          "promote", "to", "--repo", repoId, topicId, env.name,
+          "topic", "promote", "--repo", repoId, topicId, env.name,
         ]);
         broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"], ["conflicts"]);
         return c.json(result);
@@ -344,7 +344,7 @@ function createPromoteRoutes() {
       if (!repoId) return c.json({ error: "repoId is required" }, 400);
 
       try {
-        const envResult = await callCli(["env", "list", "--repo", repoId]);
+        const envResult = await callCli(["integration", "list", "--repo", repoId]);
         if (!Array.isArray(envResult)) {
           return c.json({ error: "Invalid environment list response" }, 500);
         }
@@ -354,7 +354,7 @@ function createPromoteRoutes() {
         if (!env) return c.json({ error: "Environment not found" }, 404);
 
         const result = await callCli([
-          "promote", "from", "--repo", repoId, topicId, env.name,
+          "topic", "demote", "--repo", repoId, topicId, env.name,
         ]);
         broadcastInvalidate(["topics"], ["topicEnvironments"], ["rebuilds"]);
         return c.json(result);
@@ -464,24 +464,16 @@ function createTopicEnvironmentRoutes() {
 }
 
 function createRebuildsRoutes() {
-  return new Hono().get("/", async (c) => {
-    try {
-      const result = await callCli(["rebuild", "list"]);
-      return c.json(result);
-    } catch (err) {
-      return handleCliError(c, err);
-    }
+  return new Hono().get("/", (c) => {
+    // rebuild CLI commands are not yet available in the flattened CLI
+    return c.json([]);
   });
 }
 
 function createConflictsRoutes() {
-  return new Hono().get("/", async (c) => {
-    try {
-      const result = await callCli(["conflicts", "list"]);
-      return c.json(result);
-    } catch (err) {
-      return handleCliError(c, err);
-    }
+  return new Hono().get("/", (c) => {
+    // conflicts CLI commands are not yet available in the flattened CLI
+    return c.json([]);
   });
 }
 

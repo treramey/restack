@@ -67,6 +67,8 @@ pub enum TopicCommand {
         #[arg(long)]
         repo: Option<String>,
     },
+    /// List all topic-environment associations
+    Envs,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -338,6 +340,10 @@ pub fn handle(
                 let topics = topic_service::list_topics(conn, repo_id.as_ref())?;
                 Ok(serde_json::to_string_pretty(&topics)?)
             }
+        }
+        TopicCommand::Envs => {
+            let topic_envs = topic_env_repo::list_all_topic_environments(conn)?;
+            Ok(serde_json::to_string_pretty(&topic_envs)?)
         }
         TopicCommand::Status { id, repo } => {
             let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;

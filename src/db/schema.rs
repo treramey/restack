@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-const SCHEMA_VERSION: i32 = 6;
+const SCHEMA_VERSION: i32 = 7;
 
 pub fn init_schema(conn: &Connection) -> Result<()> {
     let mut current_version: i32 =
@@ -165,6 +165,22 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             "ALTER TABLE repos ADD COLUMN refs_fingerprint TEXT;
              ALTER TABLE repos ADD COLUMN last_refreshed_at TEXT;",
         )?;
+        conn.pragma_update(None, "user_version", 6)?;
+        current_version = 6;
+    }
+
+    if current_version <= 6 {
+        // Add branch_origin column for DBs created before it was in the initial schema
+        let has_branch_origin: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('topics') WHERE name = 'branch_origin'")?
+            .query_row([], |row| row.get::<_, i32>(0))
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        if !has_branch_origin {
+            conn.execute_batch(
+                "ALTER TABLE topics ADD COLUMN branch_origin TEXT NOT NULL DEFAULT 'tracked';",
+            )?;
+        }
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 
