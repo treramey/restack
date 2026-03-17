@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
@@ -133,6 +134,26 @@ enum Command {
         #[arg(long, short, default_value = "6969")]
         port: u16,
     },
+
+    /// Internal: persistent NDJSON server over stdin/stdout (used by UI host)
+    #[command(hide = true)]
+    Serve,
+}
+
+#[derive(serde::Deserialize)]
+struct ServeRequest {
+    id: String,
+    args: Vec<String>,
+}
+
+/// Every response sets exactly one of `result` or `error`.
+#[derive(serde::Serialize)]
+struct ServeResponse {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 fn default_db_path() -> PathBuf {
@@ -223,6 +244,130 @@ fn main() {
         }
     }
 
+    // Serve: persistent stdin/stdout JSON-RPC loop
+    if let Command::Serve = &cli.command {
+        let db_path = cli.db.unwrap_or_else(default_db_path);
+        let conn = match db::open_db(&db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("restack serve: failed to open DB: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        let stdin = std::io::stdin();
+        let reader = std::io::BufReader::new(stdin.lock());
+        let stdout = std::io::stdout();
+        let mut writer = stdout.lock();
+
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(_) => break,
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let req: ServeRequest = match serde_json::from_str(&line) {
+                Ok(r) => r,
+                Err(e) => {
+                    let resp = ServeResponse {
+                        id: "unknown".into(),
+                        result: None,
+                        error: Some(e.to_string()),
+                    };
+                    if let Err(e) = serde_json::to_writer(&mut writer, &resp) {
+                        if e.io_error_kind() == Some(std::io::ErrorKind::BrokenPipe) {
+                            break;
+                        }
+                        eprintln!("restack serve: write error: {}", e);
+                    }
+                    if let Err(e) = writeln!(writer) {
+                        if e.kind() == std::io::ErrorKind::BrokenPipe {
+                            break;
+                        }
+                        eprintln!("restack serve: write error: {}", e);
+                    }
+                    if let Err(e) = writer.flush() {
+                        if e.kind() == std::io::ErrorKind::BrokenPipe {
+                            break;
+                        }
+                        eprintln!("restack serve: write error: {}", e);
+                    }
+                    continue;
+                }
+            };
+
+            let mut full_args = vec!["restack".to_string()];
+            full_args.extend(req.args.clone());
+            // Only append --json if not already present.
+            if !req.args.iter().any(|a| a == "--json") {
+                full_args.push("--json".to_string());
+            }
+
+            // NOTE: Commands that call std::env::current_dir() (Init, Refresh, Add, Topic, Integration)
+            // resolve relative to the serve process's cwd, not the client's.
+            // A future protocol extension could add an optional `cwd` field to ServeRequest.
+            let resp = match Cli::try_parse_from(&full_args) {
+                Ok(parsed_cli) => {
+                    match &parsed_cli.command {
+                        Command::Serve | Command::Ui { .. } => ServeResponse {
+                            id: req.id,
+                            result: None,
+                            error: Some("command not available via serve".into()),
+                        },
+                        _ => {
+                            let no_reconcile = parsed_cli.no_reconcile;
+                            match run_with_conn(&parsed_cli.command, &conn, no_reconcile) {
+                                Ok(json_str) => {
+                                    let value: serde_json::Value =
+                                        serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null);
+                                    ServeResponse {
+                                        id: req.id,
+                                        result: Some(value),
+                                        error: None,
+                                    }
+                                }
+                                Err(e) => ServeResponse {
+                                    id: req.id,
+                                    result: None,
+                                    error: Some(e.to_string()),
+                                },
+                            }
+                        }
+                    }
+                }
+                Err(e) => ServeResponse {
+                    id: req.id,
+                    result: None,
+                    error: Some(e.to_string()),
+                },
+            };
+
+            if let Err(e) = serde_json::to_writer(&mut writer, &resp) {
+                if e.io_error_kind() == Some(std::io::ErrorKind::BrokenPipe) {
+                    break;
+                }
+                eprintln!("restack serve: write error: {}", e);
+            }
+            if let Err(e) = writeln!(writer) {
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    break;
+                }
+                eprintln!("restack serve: write error: {}", e);
+            }
+            if let Err(e) = writer.flush() {
+                if e.kind() == std::io::ErrorKind::BrokenPipe {
+                    break;
+                }
+                eprintln!("restack serve: write error: {}", e);
+            }
+        }
+
+        return;
+    }
+
     let db_path = cli.db.unwrap_or_else(default_db_path);
 
     let result = run(&cli.command, &db_path, cli.no_reconcile);
@@ -250,19 +395,26 @@ fn main() {
 }
 
 fn run(command: &Command, db_path: &Path, no_reconcile: bool) -> error::Result<String> {
+    let conn = db::open_db(db_path)?;
+    run_with_conn(command, &conn, no_reconcile)
+}
+
+fn run_with_conn(
+    command: &Command,
+    conn: &rusqlite::Connection,
+    no_reconcile: bool,
+) -> error::Result<String> {
     match command {
         Command::Init => {
             let cwd = std::env::current_dir()?;
             commands::init::handle_init(&cwd)
         }
         Command::Refresh { repo } => {
-            let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
-            commands::refresh::handle_refresh(&conn, repo.as_deref(), &cwd)
+            commands::refresh::handle_refresh(conn, repo.as_deref(), &cwd)
         }
         Command::List => {
-            let conn = db::open_db(db_path)?;
-            let repos = core::repo_service::list_repos(&conn)?;
+            let repos = core::repo_service::list_repos(conn)?;
             Ok(serde_json::to_string_pretty(&repos)?)
         }
         Command::Add {
@@ -271,43 +423,35 @@ fn run(command: &Command, db_path: &Path, no_reconcile: bool) -> error::Result<S
             id: _,
             all,
         } => {
-            let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
             let workspace_root = core::workspace::find_workspace_root(&cwd)?;
 
             if *all {
-                let result = core::repo_service::detect_repos(&conn, &workspace_root)?;
+                let result = core::repo_service::detect_repos(conn, &workspace_root)?;
                 return Ok(serde_json::to_string_pretty(&result)?);
             }
 
             let result =
-                core::repo_service::add_repo(&conn, &workspace_root, path, name.as_deref(), true)?;
+                core::repo_service::add_repo(conn, &workspace_root, path, name.as_deref(), true)?;
             Ok(serde_json::to_string_pretty(&result)?)
         }
         Command::Remove { id } => {
-            let conn = db::open_db(db_path)?;
-            core::repo_service::remove_repo(&conn, id)?;
+            core::repo_service::remove_repo(conn, id)?;
             Ok(serde_json::json!({ "deleted": true }).to_string())
         }
         Command::Topic(cmd) => {
-            let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
-            commands::topic::handle(&conn, cmd, &cwd, no_reconcile)
+            commands::topic::handle(conn, cmd, &cwd, no_reconcile)
         }
         Command::Integration(cmd) => {
-            let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
-            commands::integration::handle(&conn, cmd, &cwd, no_reconcile)
+            commands::integration::handle(conn, cmd, &cwd, no_reconcile)
         }
-        // Command::Conflicts(cmd) => {
-        //     let conn = db::open_db(db_path)?;
-        //     commands::conflicts::handle(&conn, cmd)
-        // }
-        // Command::Pr(cmd) => {
-        //     let conn = db::open_db(db_path)?;
-        //     commands::pr::handle(&conn, cmd)
-        // }
+        // Command::Conflicts(cmd) => commands::conflicts::handle(conn, cmd),
+        // Command::Pr(cmd) => commands::pr::handle(conn, cmd),
         // Command::Completions { .. } => unreachable!("completions handled before run()"),
         Command::Ui { .. } => unreachable!("ui handled before run()"),
+        Command::Serve => unreachable!("serve handled before run()"),
     }
 }
+

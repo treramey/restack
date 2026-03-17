@@ -6,7 +6,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import { Hono, type Context } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { StatusCode } from "hono/utils/http-status";
-import { callCli } from "./cli.js";
+import { callCli, shutdownCli } from "./cli.js";
 import { CliError } from "./types.js";
 
 const WS_OPEN = 1;
@@ -630,4 +630,13 @@ export async function startUiServer(config: UiServerConfig): Promise<void> {
   );
 
   injectWebSocket(server);
+
+  process.on("SIGTERM", () => {
+    shutdownCli();
+    server.close(() => process.exit(0));
+  });
+  process.on("SIGINT", () => {
+    shutdownCli();
+    server.close(() => process.exit(0));
+  });
 }
