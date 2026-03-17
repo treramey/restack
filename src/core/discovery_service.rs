@@ -4,6 +4,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+use crate::config::repo_config::RepoConfig;
 use crate::config::{DiscoveryMode, WorkspaceConfig};
 use crate::db::{env_repo, repo_repo, topic_env_repo, topic_repo};
 use crate::error::Result;
@@ -23,12 +24,28 @@ pub struct DiscoveryResult {
 
 #[derive(Debug, Clone)]
 pub enum RepoMutation {
-    CreateTopic { branch: String, origin: BranchOrigin },
-    UpdateOrigin { topic_id: TopicId, origin: BranchOrigin },
-    DeleteTopic { topic_id: TopicId },
-    AssignToEnv { topic_id: TopicId, env_id: EnvId },
-    RemoveFromAllEnvs { topic_id: TopicId },
-    UpdateStatus { topic_id: TopicId, status: TopicStatus },
+    CreateTopic {
+        branch: String,
+        origin: BranchOrigin,
+    },
+    UpdateOrigin {
+        topic_id: TopicId,
+        origin: BranchOrigin,
+    },
+    DeleteTopic {
+        topic_id: TopicId,
+    },
+    AssignToEnv {
+        topic_id: TopicId,
+        env_id: EnvId,
+    },
+    RemoveFromAllEnvs {
+        topic_id: TopicId,
+    },
+    UpdateStatus {
+        topic_id: TopicId,
+        status: TopicStatus,
+    },
 }
 
 pub struct RepoSnapshot {
@@ -51,18 +68,29 @@ pub fn discover_topics_plan(
     repo: &crate::types::Repo,
     snapshot: &RepoSnapshot,
     config: &WorkspaceConfig,
-) -> Result<(Vec<RepoMutation>, DiscoveryResult, Option<String>, Option<MergeData>)> {
+    repo_config: Option<&RepoConfig>,
+) -> Result<(
+    Vec<RepoMutation>,
+    DiscoveryResult,
+    Option<String>,
+    Option<MergeData>,
+)> {
     let repo_path = Path::new(&repo.path);
 
     // Fingerprint gating: skip if refs haven't changed
-    let new_fingerprint = git::compute_refs_fingerprint(repo_path)
-        .unwrap_or_default();
+    let new_fingerprint = git::compute_refs_fingerprint(repo_path).unwrap_or_default();
     if !new_fingerprint.is_empty()
         && repo.refs_fingerprint.as_deref() == Some(new_fingerprint.as_str())
     {
         return Ok((
             Vec::new(),
-            DiscoveryResult { discovered: 0, created: 0, closed: 0, skipped: 0, topics: Vec::new() },
+            DiscoveryResult {
+                discovered: 0,
+                created: 0,
+                closed: 0,
+                skipped: 0,
+                topics: Vec::new(),
+            },
             None,
             None,
         ));
@@ -76,12 +104,17 @@ pub fn discover_topics_plan(
 
     let branches = git::list_branch_presence(repo_path)?;
 
-    let known_branches: HashSet<String> =
-        branches.iter().map(|b| b.branch.clone()).collect();
-    let remote_branches: HashSet<String> =
-        branches.iter().filter(|b| b.has_remote).map(|b| b.branch.clone()).collect();
-    let local_branches: HashSet<String> =
-        branches.iter().filter(|b| b.has_local).map(|b| b.branch.clone()).collect();
+    let known_branches: HashSet<String> = branches.iter().map(|b| b.branch.clone()).collect();
+    let remote_branches: HashSet<String> = branches
+        .iter()
+        .filter(|b| b.has_remote)
+        .map(|b| b.branch.clone())
+        .collect();
+    let local_branches: HashSet<String> = branches
+        .iter()
+        .filter(|b| b.has_local)
+        .map(|b| b.branch.clone())
+        .collect();
 
     let mut mutations: Vec<RepoMutation> = Vec::new();
     let mut discovered = 0i32;
@@ -98,6 +131,13 @@ pub fn discover_topics_plan(
             skipped += 1;
             continue;
         }
+        // Check repo-level exclude patterns from .restack.yml
+        if let Some(repo_cfg) = repo_config {
+            if repo_cfg.is_branch_excluded(&bp.branch) {
+                skipped += 1;
+                continue;
+            }
+        }
 
         let existing = snapshot.topics.iter().find(|t| t.branch == bp.branch);
         if let Some(topic) = existing {
@@ -112,7 +152,10 @@ pub fn discover_topics_plan(
             discovered += 1;
         } else {
             let origin = classify_new_topic_origin(bp.has_local, bp.has_remote);
-            mutations.push(RepoMutation::CreateTopic { branch: bp.branch.clone(), origin });
+            mutations.push(RepoMutation::CreateTopic {
+                branch: bp.branch.clone(),
+                origin,
+            });
             discovered += 1;
             created += 1;
         }
@@ -126,8 +169,12 @@ pub fn discover_topics_plan(
             continue;
         }
         if !known_branches.contains(&topic.branch) {
-            mutations.push(RepoMutation::RemoveFromAllEnvs { topic_id: topic.id.clone() });
-            mutations.push(RepoMutation::DeleteTopic { topic_id: topic.id.clone() });
+            mutations.push(RepoMutation::RemoveFromAllEnvs {
+                topic_id: topic.id.clone(),
+            });
+            mutations.push(RepoMutation::DeleteTopic {
+                topic_id: topic.id.clone(),
+            });
             closed_topic_ids.insert(topic.id.clone());
             closed += 1;
         }
@@ -147,11 +194,10 @@ pub fn discover_topics_plan(
             Some(r) => r,
             None => continue,
         };
-        let merged: HashSet<String> =
-            git::list_branches_merged_into(repo_path, &env_ref)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
+        let merged: HashSet<String> = git::list_branches_merged_into(repo_path, &env_ref)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         env_merged.push((env.id.clone(), merged));
     }
 
@@ -164,7 +210,9 @@ pub fn discover_topics_plan(
             continue;
         }
         if merged_into_base.contains(&topic.branch) {
-            mutations.push(RepoMutation::RemoveFromAllEnvs { topic_id: topic.id.clone() });
+            mutations.push(RepoMutation::RemoveFromAllEnvs {
+                topic_id: topic.id.clone(),
+            });
             mutations.push(RepoMutation::UpdateStatus {
                 topic_id: topic.id.clone(),
                 status: TopicStatus::Graduated,
@@ -212,7 +260,11 @@ pub fn discover_topics_plan(
         })
         .collect();
 
-    let merge_data = MergeData { merged_into_base, env_merged, new_branches };
+    let merge_data = MergeData {
+        merged_into_base,
+        env_merged,
+        new_branches,
+    };
 
     let result = DiscoveryResult {
         discovered,
@@ -221,7 +273,11 @@ pub fn discover_topics_plan(
         skipped,
         topics: Vec::new(), // caller populates after apply
     };
-    let fp_result = if new_fingerprint.is_empty() { None } else { Some(new_fingerprint) };
+    let fp_result = if new_fingerprint.is_empty() {
+        None
+    } else {
+        Some(new_fingerprint)
+    };
     Ok((mutations, result, fp_result, Some(merge_data)))
 }
 
@@ -298,7 +354,7 @@ pub fn apply_mutations(
 pub fn discover_topics(
     conn: &Connection,
     repo_id: &RepoId,
-    _repo_path: &Path,
+    repo_path: &Path,
     config: &WorkspaceConfig,
 ) -> Result<DiscoveryResult> {
     let repo = repo_repo::get_repo(conn, repo_id)?;
@@ -313,10 +369,18 @@ pub fn discover_topics(
             topic_envs.insert(topic.id.clone(), env_ids);
         }
     }
-    let snapshot = RepoSnapshot { topics, envs, topic_envs };
+    let snapshot = RepoSnapshot {
+        topics,
+        envs,
+        topic_envs,
+    };
+
+    // Load repo-level config from .restack.yml if it exists
+    let repo_config =
+        crate::config::repo_config::load_repo_config(&repo_path.join(".restack.yml")).ok();
 
     let (mutations, mut result, _fingerprint, merge_data) =
-        discover_topics_plan(&repo, &snapshot, config)?;
+        discover_topics_plan(&repo, &snapshot, config, repo_config.as_ref())?;
 
     if !mutations.is_empty() || merge_data.is_some() {
         apply_mutations(conn, repo_id, &mutations, merge_data.as_ref())?;
@@ -380,6 +444,6 @@ fn preferred_ref(
     }
 }
 
-pub fn archive_topic(conn: &Connection, topic_id: &crate::id::TopicId) -> Result<Topic> {
+pub fn demote_topic(conn: &Connection, topic_id: &crate::id::TopicId) -> Result<Topic> {
     topic_repo::update_topic_status_return(conn, topic_id, TopicStatus::Closed)
 }

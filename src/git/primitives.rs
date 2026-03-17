@@ -152,7 +152,13 @@ pub fn list_local_branches(repo: &Path) -> GitResult<Vec<String>> {
 pub fn list_branches_merged_into(repo: &Path, target_ref: &str) -> GitResult<Vec<String>> {
     let output = run_git(
         repo,
-        &["branch", "-a", "--merged", target_ref, "--format=%(refname:short)"],
+        &[
+            "branch",
+            "-a",
+            "--merged",
+            target_ref,
+            "--format=%(refname:short)",
+        ],
     )?;
     if output.is_empty() {
         return Ok(Vec::new());
@@ -661,8 +667,16 @@ pub fn create_branch_at_sha(repo: &Path, branch: &str, sha: &str) -> GitResult<(
 }
 
 pub fn compute_refs_fingerprint(repo: &Path) -> GitResult<String> {
-    let output = run_git(repo, &["for-each-ref", "--format=%(objectname)", "--sort=refname", "refs/remotes/origin/"])?;
-    use sha2::{Sha256, Digest};
+    let output = run_git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(objectname)",
+            "--sort=refname",
+            "refs/remotes/origin/",
+        ],
+    )?;
+    use sha2::{Digest, Sha256};
     let hash = Sha256::digest(output.as_bytes());
     Ok(format!("{hash:x}"))
 }

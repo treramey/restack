@@ -20,9 +20,6 @@ use commands::{
     // conflicts::ConflictsCommand,
     env::EnvCommand,
     // pr::PrCommand,
-    promote::PromoteCommand,
-    rebuild::RebuildCommand,
-    repo::RepoCommand,
     topic::TopicCommand,
 };
 use output::Printer;
@@ -30,6 +27,7 @@ use output::Printer;
 #[derive(Parser)]
 #[command(name = "restack")]
 #[command(version)]
+#[command(disable_help_subcommand = true)]
 #[command(
     about = "Restack - Topic branch integration manager",
     long_about = r#"
@@ -83,9 +81,31 @@ enum Command {
         repo: Option<String>,
     },
 
-    /// Repository management
-    #[command(subcommand)]
-    Repo(RepoCommand),
+    /// List all repositories
+    List,
+
+    /// Add a repository to the workspace
+    Add {
+        /// Path to the repository (defaults to current directory)
+        #[arg(default_value = ".")]
+        path: String,
+        /// Optional name for the repository (defaults to directory name)
+        #[arg(short, long)]
+        name: Option<String>,
+        /// Optional repo ID override
+        #[arg(short, long)]
+        id: Option<String>,
+        /// Add all repositories found in the workspace
+        #[arg(long)]
+        all: bool,
+    },
+
+    /// Remove a repository from the workspace
+    Remove {
+        /// Repo ID or name
+        id: String,
+    },
+
     /// Topic branch tracking
     #[command(subcommand)]
     Topic(TopicCommand),
@@ -93,14 +113,6 @@ enum Command {
     /// Environment management
     #[command(subcommand)]
     Env(EnvCommand),
-
-    /// Promote/demote topics between environments
-    #[command(subcommand)]
-    Promote(PromoteCommand),
-
-    /// Rebuild integration branches
-    #[command(subcommand)]
-    Rebuild(RebuildCommand),
 
     // /// List conflicts
     // #[command(subcommand)]
@@ -248,11 +260,34 @@ fn run(command: &Command, db_path: &Path, no_reconcile: bool) -> error::Result<S
             let cwd = std::env::current_dir()?;
             commands::refresh::handle_refresh(&conn, repo.as_deref(), &cwd)
         }
-        Command::Repo(cmd) => {
+        Command::List => {
+            let conn = db::open_db(db_path)?;
+            let repos = core::repo_service::list_repos(&conn)?;
+            Ok(serde_json::to_string_pretty(&repos)?)
+        }
+        Command::Add {
+            path,
+            name,
+            id: _,
+            all,
+        } => {
             let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
             let workspace_root = core::workspace::find_workspace_root(&cwd)?;
-            commands::repo::handle(&conn, cmd, &workspace_root)
+
+            if *all {
+                let result = core::repo_service::detect_repos(&conn, &workspace_root)?;
+                return Ok(serde_json::to_string_pretty(&result)?);
+            }
+
+            let result =
+                core::repo_service::add_repo(&conn, &workspace_root, path, name.as_deref(), true)?;
+            Ok(serde_json::to_string_pretty(&result)?)
+        }
+        Command::Remove { id } => {
+            let conn = db::open_db(db_path)?;
+            core::repo_service::remove_repo(&conn, id)?;
+            Ok(serde_json::json!({ "deleted": true }).to_string())
         }
         Command::Topic(cmd) => {
             let conn = db::open_db(db_path)?;
@@ -263,16 +298,6 @@ fn run(command: &Command, db_path: &Path, no_reconcile: bool) -> error::Result<S
             let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
             commands::env::handle(&conn, cmd, &cwd, no_reconcile)
-        }
-        Command::Promote(cmd) => {
-            let conn = db::open_db(db_path)?;
-            let cwd = std::env::current_dir()?;
-            commands::promote::handle(&conn, cmd, &cwd, no_reconcile)
-        }
-        Command::Rebuild(cmd) => {
-            let conn = db::open_db(db_path)?;
-            let cwd = std::env::current_dir()?;
-            commands::rebuild::handle(&conn, cmd, &cwd)
         }
         // Command::Conflicts(cmd) => {
         //     let conn = db::open_db(db_path)?;

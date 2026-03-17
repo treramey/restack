@@ -291,11 +291,11 @@ export function DetailPanel() {
                       }}
                     />
                   )}
-                  {/* Archive: move back to unassigned (remove from environment) */}
+                  {/* Demote: move back to unassigned (remove from environment) */}
                   {highestEnv !== null && !isGraduated && (
                     <DetailActionButton
-                      label="Archive"
-                      title="Move back to unassigned"
+                      label="Demote"
+                      title="Remove from environment"
                       disabled={isMutating}
                       variant="danger"
                       onClick={() => {

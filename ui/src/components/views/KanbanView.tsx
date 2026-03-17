@@ -444,7 +444,7 @@ export function KanbanView() {
   );
 
   // Loading state
-  if (!allTopics || !allEnvironments || !topicEnvs) {
+  if (!allTopics || !allEnvironments || !topicEnvs || !repos) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="w-16 h-1 rounded-full bg-border animate-skeleton-pulse" />
@@ -452,7 +452,19 @@ export function KanbanView() {
     );
   }
 
-  // Empty state
+  // No repo selected state (kanban requires a specific repo)
+  if (!selectedRepoId) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted font-mono text-sm p-8">
+        <p>Select a repository</p>
+        <p className="text-text-dim text-xs">
+          Use the dropdown above to choose a repo
+        </p>
+      </div>
+    );
+  }
+
+  // Empty state - no environments for this repo
   if (environments.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted font-mono text-sm p-8">

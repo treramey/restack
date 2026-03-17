@@ -178,14 +178,20 @@ impl RepoRow {
             base_branch: self.base_branch,
             created_at,
             refs_fingerprint: self.refs_fingerprint,
-            last_refreshed_at: self.last_refreshed_at
+            last_refreshed_at: self
+                .last_refreshed_at
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
                 .map(|dt| dt.with_timezone(&Utc)),
         })
     }
 }
 
-pub fn update_repo_fingerprint(conn: &Connection, id: &RepoId, fingerprint: &str, refreshed_at: &str) -> Result<()> {
+pub fn update_repo_fingerprint(
+    conn: &Connection,
+    id: &RepoId,
+    fingerprint: &str,
+    refreshed_at: &str,
+) -> Result<()> {
     let affected = conn.execute(
         "UPDATE repos SET refs_fingerprint = ?1, last_refreshed_at = ?2 WHERE id = ?3",
         rusqlite::params![fingerprint, refreshed_at, id],

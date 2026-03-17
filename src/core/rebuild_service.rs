@@ -4,35 +4,12 @@ use dialoguer::Select;
 use rusqlite::Connection;
 
 use crate::db::{
-    conflict_repo, env_repo, rebuild_repo, rebuild_topic_repo, repo_repo, speculative_ref_repo,
-    topic_env_repo,
+    conflict_repo, env_repo, rebuild_repo, rebuild_topic_repo, repo_repo, topic_env_repo,
 };
 use crate::error::Result;
 use crate::git;
-use crate::id::{EnvId, RepoId, TopicId};
+use crate::id::{EnvId, RepoId};
 use crate::types::{CiStatus, Rebuild, RebuildStatus, Topic, TopicStatus};
-
-/// Intermediate speculative ref step collected during a rebuild merge loop.
-struct SpecStep {
-    step: i32,
-    topic_id: TopicId,
-    sha: String,
-    branch_name: String,
-}
-
-/// Sanitize a string for use as a git branch name segment.
-fn sanitize_branch_segment(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .to_lowercase()
-}
 
 /// Action chosen by the user during interactive conflict resolution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,21 +95,7 @@ pub fn rebuild_env(
 
     let repo_path = Path::new(&repo.path);
 
-    // Save previous rebuild ID before creating a new one, for speculative ref cleanup.
-    let prev_rebuild_id = rebuild_repo::get_last_rebuild(conn, env_id)
-        .ok()
-        .flatten()
-        .map(|r| r.id);
-
     let rebuild = rebuild_repo::create_rebuild(conn, env_id)?;
-    let rebuild_id_short = rebuild
-        .id
-        .as_str()
-        .strip_prefix("rebuild_")
-        .unwrap_or(rebuild.id.as_str())
-        .to_string();
-    let env_name_seg = sanitize_branch_segment(&env.name);
-    let mut spec_steps: Vec<SpecStep> = Vec::new();
 
     let mut merged_count: i32 = 0;
     let mut conflicted_count: i32 = 0;
@@ -183,15 +146,6 @@ pub fn rebuild_env(
                         current_phase,
                         merge_order,
                     )?;
-                    let branch_name = format!(
-                        "restack/spec/{env_name_seg}/{rebuild_id_short}/step-{merge_order}"
-                    );
-                    spec_steps.push(SpecStep {
-                        step: merge_order,
-                        topic_id: topic.id.clone(),
-                        sha: current_sha.clone(),
-                        branch_name,
-                    });
                     merge_order += 1;
                     merged_count += 1;
                 }
@@ -260,15 +214,6 @@ pub fn rebuild_env(
                         current_phase,
                         merge_order,
                     )?;
-                    let branch_name = format!(
-                        "restack/spec/{env_name_seg}/{rebuild_id_short}/step-{merge_order}"
-                    );
-                    spec_steps.push(SpecStep {
-                        step: merge_order,
-                        topic_id: topic.id.clone(),
-                        sha: current_sha.clone(),
-                        branch_name,
-                    });
                     merge_order += 1;
                     merged_count += 1;
                 }
@@ -302,51 +247,6 @@ pub fn rebuild_env(
         }
 
         // Cleanup old speculative refs from previous rebuild (best-effort)
-        if let Some(ref prev_id) = prev_rebuild_id {
-            if let Ok(old_refs) = speculative_ref_repo::get_refs_for_rebuild(conn, prev_id) {
-                if !old_refs.is_empty() {
-                    let old_branches: Vec<&str> =
-                        old_refs.iter().map(|r| r.branch_name.as_str()).collect();
-                    if has_remote {
-                        let _ = git::delete_remote_refs(repo_path, &old_branches);
-                    }
-                    for branch in &old_branches {
-                        let _ = git::branch_delete(repo_path, branch, false);
-                    }
-                    let _ = speculative_ref_repo::delete_refs_for_rebuild(conn, prev_id);
-                }
-            }
-        }
-
-        // Create local branches and DB records for each speculative ref (best-effort)
-        for step in &spec_steps {
-            if let Err(e) = git::create_branch_at_sha(repo_path, &step.branch_name, &step.sha) {
-                eprintln!(
-                    "Warning: failed to create speculative branch {}: {e}",
-                    step.branch_name
-                );
-            } else {
-                let _ = speculative_ref_repo::create_speculative_ref(
-                    conn,
-                    &rebuild.id,
-                    &env.id,
-                    step.step,
-                    &step.topic_id,
-                    &step.sha,
-                    &step.branch_name,
-                );
-            }
-        }
-
-        // Push all speculative ref branches in one batch (best-effort)
-        if has_remote && !spec_steps.is_empty() {
-            let spec_branches: Vec<&str> =
-                spec_steps.iter().map(|s| s.branch_name.as_str()).collect();
-            if let Err(e) = git::push_refs(repo_path, &spec_branches) {
-                eprintln!("Warning: failed to push speculative refs: {e}");
-            }
-        }
-
         let _ =
             rebuild_repo::set_rebuild_ci_status(conn, &rebuild.id, Some(CiStatus::Pending), None);
         let _ = env_repo::set_env_ci_status(conn, &env.id, Some(CiStatus::Pending), None);

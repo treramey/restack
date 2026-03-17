@@ -13,6 +13,9 @@ pub struct RepoConfig {
     /// Environment entries in graduation order (index 0 = closest to production)
     #[serde(default)]
     pub environments: Vec<EnvironmentEntry>,
+    /// Branch patterns to exclude from topic tracking (glob-style)
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
 }
 
 /// A single environment entry supporting two YAML forms:
@@ -62,6 +65,13 @@ pub const DEFAULT_RESTACK_YML: &str = r#"version: "1"
 environments:
   - dev
   - staging
+
+# Branch patterns to exclude from topic tracking.
+# Supports glob-style patterns with * wildcard.
+# exclude_patterns:
+#   - "dependabot/*"
+#   - "renovate/*"
+#   - "ci-*"
 "#;
 
 /// Load repo config from a `.restack.yml` file.
@@ -129,6 +139,31 @@ pub fn validate_production_branch_collision(config: &RepoConfig, prod_branch: &s
     Ok(())
 }
 
+impl RepoConfig {
+    /// Check if a branch matches any of the exclude patterns.
+    /// Supports glob-style patterns with * wildcard.
+    pub fn is_branch_excluded(&self, branch: &str) -> bool {
+        for pattern in &self.exclude_patterns {
+            if Self::matches_pattern(branch, pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn matches_pattern(branch: &str, pattern: &str) -> bool {
+        if pattern.ends_with('*') {
+            let prefix = &pattern[..pattern.len() - 1];
+            branch.starts_with(prefix)
+        } else if pattern.starts_with('*') {
+            let suffix = &pattern[1..];
+            branch.ends_with(suffix)
+        } else {
+            branch == pattern
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,6 +229,7 @@ environments: []"#;
         let config = RepoConfig {
             version: "1".to_string(),
             environments: vec![],
+            exclude_patterns: vec![],
         };
         assert!(validate_version(&config).is_ok());
     }
@@ -203,6 +239,7 @@ environments: []"#;
         let config = RepoConfig {
             version: "2".to_string(),
             environments: vec![],
+            exclude_patterns: vec![],
         };
         let err = validate_version(&config).unwrap_err();
         assert!(err.to_string().contains("Invalid .restack.yml"));
@@ -317,6 +354,7 @@ environments:
                 },
                 EnvironmentEntry::Simple("staging".to_string()),
             ],
+            exclude_patterns: vec![],
         };
 
         let yaml = serde_yaml::to_string(&config).unwrap();

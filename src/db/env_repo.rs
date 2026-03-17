@@ -91,12 +91,7 @@ pub fn delete_env(conn: &Connection, id: &EnvId) -> Result<()> {
     Ok(())
 }
 
-pub fn update_env(
-    conn: &Connection,
-    env_id: &EnvId,
-    branch: &str,
-    ordinal: i32,
-) -> Result<()> {
+pub fn update_env(conn: &Connection, env_id: &EnvId, branch: &str, ordinal: i32) -> Result<()> {
     let affected = conn.execute(
         "UPDATE environments SET branch = ?1, ordinal = ?2 WHERE id = ?3",
         rusqlite::params![branch, ordinal, env_id],

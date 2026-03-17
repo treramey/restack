@@ -50,7 +50,7 @@ restack refresh [--repo REPO_ID]
 **Actions:**
 1. `git fetch origin` for all repos
 2. Discover new branches (respecting exclusion patterns)
-3. Archive topics whose branches no longer exist
+3. Close topics whose branches no longer exist
 4. Sync topic CI status from provider (if configured)
 5. Sync environment CI status (checks env branch CI, runs blame on failure)
 6. Auto-promote CI-passed topics to `auto_promote` environments (gated by env CI status)
@@ -107,12 +107,12 @@ restack topic untrack <ID> --repo <REPO_ID>
 - `ID` (required): Topic ID or branch name
 - `--repo` (required): Repo ID
 
-### `restack topic archive`
+### `restack topic demote`
 
-Archive a topic (hide from board, mark as closed).
+Demote a topic (remove from environment, mark as closed).
 
 ```bash
-restack topic archive <ID> --repo <REPO_ID>
+restack topic demote <ID> --repo <REPO_ID>
 ```
 
 **Arguments:**

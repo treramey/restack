@@ -14,7 +14,7 @@ fn restack_binary() -> String {
 }
 
 #[test]
-fn test_repo_add_cli_without_discover() {
+fn test_repo_add_cli_always_discovers() {
     let binary = restack_binary();
     let workspace = tempdir().expect("create temp dir");
 
@@ -33,27 +33,27 @@ fn test_repo_add_cli_without_discover() {
     );
 
     let add_output = Command::new(&binary)
-        .args(["repo", "add", repo_dir.path().to_str().unwrap()])
+        .args(["add", repo_dir.path().to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
 
     assert!(
         add_output.status.success(),
-        "repo add failed: {:?}",
+        "add failed: {:?}",
         add_output.stderr
     );
 
     let stdout = String::from_utf8_lossy(&add_output.stdout);
-    assert!(stdout.contains("hint"), "output should contain hint field");
+    // add now always discovers topics
     assert!(
-        !stdout.contains("discovery"),
-        "output should NOT contain discovery field"
+        stdout.contains("discovery"),
+        "output should contain discovery field"
     );
 }
 
 #[test]
-fn test_repo_add_cli_with_discover() {
+fn test_repo_add_cli_with_feature_branch() {
     let binary = restack_binary();
     let workspace = tempdir().expect("create temp dir");
 
@@ -94,19 +94,14 @@ fn test_repo_add_cli_with_discover() {
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args([
-            "repo",
-            "add",
-            "--discover",
-            repo_dir.path().to_str().unwrap(),
-        ])
+        .args(["add", repo_dir.path().to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add --discover");
+        .expect("restack add");
 
     assert!(
         add_output.status.success(),
-        "repo add --discover failed: {:?}",
+        "add failed: {:?}",
         add_output.stderr
     );
 

@@ -4,13 +4,14 @@ use clap::Subcommand;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::core::{env_init_service, env_service, env_sync_service, repo_service};
+use crate::core::{env_init_service, env_service, env_sync_service, rebuild_service, repo_service};
 use crate::db::{env_repo, rebuild_repo, repo_repo};
 use crate::error::Result;
 use crate::id::RepoId;
 use crate::types::Environment;
 
 #[derive(Subcommand)]
+#[command(disable_help_subcommand = true)]
 pub enum EnvCommand {
     /// Add an environment
     Add {
@@ -76,6 +77,8 @@ pub enum EnvCommand {
         #[arg(long)]
         push: bool,
     },
+    /// Rebuild all integration environments for the current repo
+    Rebuild,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -239,6 +242,17 @@ pub fn handle(
         } => {
             let repo = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
             handle_init(conn, cwd, &repo, *interactive, *push)
+        }
+        EnvCommand::Rebuild => {
+            let repo = repo_service::resolve_repo(conn, None, cwd)?;
+            let repo_path = std::path::PathBuf::from(&repo.path);
+            let envs = env_repo::list_envs(conn, Some(&repo.id))?;
+            let mut results = Vec::new();
+            for env in envs {
+                let result = rebuild_service::rebuild_env(conn, &env.id, &repo_path, false, false)?;
+                results.push(result);
+            }
+            Ok(serde_json::to_string_pretty(&results)?)
         }
     }
 }

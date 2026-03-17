@@ -104,8 +104,7 @@ pub fn reconcile_environments(
                 summary.added.push(env_name.to_string());
             }
             Some(existing) => {
-                let needs_update =
-                    existing.branch != branch || existing.ordinal != ordinal;
+                let needs_update = existing.branch != branch || existing.ordinal != ordinal;
 
                 if needs_update {
                     env_repo::update_env(conn, &existing.id, &branch, ordinal)?;

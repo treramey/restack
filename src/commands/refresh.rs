@@ -5,6 +5,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use rusqlite::Connection;
 
 use crate::config;
+use crate::config::repo_config;
 use crate::core::discovery_service::{self, RepoSnapshot};
 use crate::core::provider_service;
 use crate::db::{env_repo, repo_repo, topic_env_repo, topic_repo};
@@ -130,25 +131,35 @@ pub fn handle_refresh(
                 let cfg = Arc::clone(&cfg);
                 s.spawn(move || {
                     let _guard = SemaphoreGuard::acquire(&sem);
-                    let result = discovery_service::discover_topics_plan(repo, snapshot, &cfg);
+                    let repo_path = Path::new(&repo.path);
+                    let repo_config =
+                        repo_config::load_repo_config(&repo_path.join(".restack.yml")).ok();
+                    let result = discovery_service::discover_topics_plan(
+                        repo,
+                        snapshot,
+                        &cfg,
+                        repo_config.as_ref(),
+                    );
                     (repo, result)
                 })
             })
             .collect();
 
-        handles.into_iter().filter_map(|h| {
-            match h.join() {
+        handles
+            .into_iter()
+            .filter_map(|h| match h.join() {
                 Ok(result) => Some(result),
                 Err(payload) => {
                     let msg = payload
-                        .downcast_ref::<&str>().copied()
+                        .downcast_ref::<&str>()
+                        .copied()
                         .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
                         .unwrap_or("unknown panic");
                     eprintln!("Warning: refresh thread panicked: {msg}");
                     None
                 }
-            }
-        }).collect()
+            })
+            .collect()
     });
 
     // Phase 3: serial apply (DB writes, single connection)
@@ -157,7 +168,12 @@ pub fn handle_refresh(
         match result {
             Ok((mutations, mut discovery, fingerprint, merge_data)) => {
                 if !mutations.is_empty() || merge_data.is_some() {
-                    discovery_service::apply_mutations(conn, &repo.id, &mutations, merge_data.as_ref())?;
+                    discovery_service::apply_mutations(
+                        conn,
+                        &repo.id,
+                        &mutations,
+                        merge_data.as_ref(),
+                    )?;
                 }
                 if let Some(fp) = fingerprint {
                     let now = chrono::Utc::now().to_rfc3339();

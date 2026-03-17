@@ -122,13 +122,8 @@ pub fn init_envs(
                 result.environments.push(existing);
             }
             None => {
-                match env_service::add_env(
-                    &tx,
-                    repo_id,
-                    &input.name,
-                    &input.branch,
-                    input.ordinal,
-                ) {
+                match env_service::add_env(&tx, repo_id, &input.name, &input.branch, input.ordinal)
+                {
                     Ok(env) => {
                         result.created_envs.push(input.name.clone());
                         result.environments.push(env);

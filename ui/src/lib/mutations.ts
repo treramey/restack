@@ -11,6 +11,7 @@ import { announce } from "./announce.js";
 import type {
   EnvId,
   TopicId,
+  TopicEnvironment,
   SyncResult,
   GeneratedFile,
   PullRequest,
@@ -60,15 +61,39 @@ export function useDemote() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ topicId, envId, repoId }),
       }),
-    onSuccess: () => {
+    onMutate: async ({ topicId, envId }) => {
+      // Cancel any in-flight refetches to avoid overwriting optimistic update
+      await qc.cancelQueries({ queryKey: queryKeys.topicEnvironments.all });
+
+      // Snapshot previous value for rollback
+      const previousTopicEnvs = qc.getQueryData<TopicEnvironment[]>(
+        queryKeys.topicEnvironments.list()
+      );
+
+      // Optimistically remove the topic-environment association
+      if (previousTopicEnvs) {
+        qc.setQueryData(
+          queryKeys.topicEnvironments.list(),
+          previousTopicEnvs.filter((te) => !(te.topicId === topicId && te.envId === envId))
+        );
+      }
+
+      return { previousTopicEnvs };
+    },
+    onError: (err, _variables, context) => {
+      // Rollback to previous value on error
+      if (context?.previousTopicEnvs) {
+        qc.setQueryData(queryKeys.topicEnvironments.list(), context.previousTopicEnvs);
+      }
+      toast.error("Demote failed", { description: err.message });
+      announce(`Demote failed: ${err.message}`);
+    },
+    onSettled: () => {
+      // Always invalidate to sync with server state
       void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });
       void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
       void qc.invalidateQueries({ queryKey: queryKeys.rebuilds.all });
       announce("Topic removed from environment");
-    },
-    onError: (err) => {
-      toast.error("Demote failed", { description: err.message });
-      announce(`Demote failed: ${err.message}`);
     },
   });
 }

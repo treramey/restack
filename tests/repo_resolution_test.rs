@@ -39,16 +39,10 @@ fn test_topic_list_auto_detects_from_repo_dir() {
     assert!(init_output.status.success());
 
     let add_output = restack_cmd()
-        .args([
-            "repo",
-            "add",
-            "--name",
-            "my-api",
-            repo_dir.path().to_str().unwrap(),
-        ])
+        .args(["add", "--name", "my-api", repo_dir.path().to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
     assert!(add_output.status.success());
 
     let list_output = restack_cmd()
@@ -99,16 +93,10 @@ fn test_topic_list_with_short_name() {
         .expect("restack init");
 
     restack_cmd()
-        .args([
-            "repo",
-            "add",
-            "--name",
-            "my-api",
-            repo_dir.path().to_str().unwrap(),
-        ])
+        .args(["add", "--name", "my-api", repo_dir.path().to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
 
     let list_output = restack_cmd()
         .args(["topic", "list", "--repo", "my-api"])

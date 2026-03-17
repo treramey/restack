@@ -5,39 +5,44 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::config;
-use crate::core::{discovery_service, env_sync_service, repo_service, topic_service};
-use crate::db::repo_repo;
+use crate::core::{
+    discovery_service, env_sync_service, promote_service, repo_service, topic_service,
+};
+use crate::db::{env_repo, repo_repo, topic_env_repo, topic_repo};
 use crate::error::Result;
 use crate::id::RepoId;
 use crate::types::Topic;
 
 #[derive(Subcommand)]
+#[command(disable_help_subcommand = true)]
 pub enum TopicCommand {
-    /// Track a branch as a topic
-    Track {
-        /// Branch name
-        branch: String,
+    /// Promote a topic to an environment (auto-promotes to next env if not specified)
+    Promote {
+        /// Topic ID or branch name (omit when using --all)
+        topic: Option<String>,
+        /// Target environment name (auto-detects next env if omitted; required when using --all)
+        env: Option<String>,
         /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
         repo: Option<String>,
+        /// Promote all topics in the specified environment (requires env argument)
+        #[arg(long)]
+        all: bool,
     },
-    /// Untrack a topic
-    Untrack {
-        /// Topic ID or branch name
-        id: String,
+    /// Demote a topic from an environment (auto-demotes from current env if not specified)
+    Demote {
+        /// Topic ID or branch name (omit when using --all)
+        topic: Option<String>,
+        /// Environment name to remove from (auto-detects current env if omitted; required when using --all)
+        env: Option<String>,
         /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
         repo: Option<String>,
-    },
-    /// Archive a topic (hide from board, mark as closed)
-    Archive {
-        /// Topic ID or branch name
-        id: String,
-        /// Repo ID or name (auto-detected if not specified)
+        /// Demote all topics from the specified environment (requires env argument)
         #[arg(long)]
-        repo: Option<String>,
+        all: bool,
     },
-    /// Close a topic: delete branch on origin + local, then remove from DB
+    /// Close a topic: delete from origin and remove from all environments
     Close {
         /// Topic ID or branch name
         id: String,
@@ -62,8 +67,6 @@ pub enum TopicCommand {
         #[arg(long)]
         repo: Option<String>,
     },
-    /// List topic-environment assignments
-    Envs,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -81,26 +84,6 @@ pub fn handle(
     no_reconcile: bool,
 ) -> Result<String> {
     match cmd {
-        TopicCommand::Track { branch, repo } => {
-            let repo = if let Some(repo_arg) = repo {
-                repo_service::resolve_repo(conn, Some(repo_arg), workspace_root)?
-            } else {
-                match repo_service::resolve_repo(conn, None, workspace_root) {
-                    Ok(repo) => repo,
-                    Err(crate::error::RestackError::NotInTrackedRepo) => {
-                        repo_service::resolve_repo_by_branch(conn, branch)?
-                    }
-                    Err(e) => return Err(e),
-                }
-            };
-            let topic = topic_service::track_topic(conn, &repo.id, branch)?;
-            Ok(serde_json::to_string_pretty(&topic)?)
-        }
-        TopicCommand::Untrack { id, repo } => {
-            let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
-            topic_service::untrack_topic(conn, id, &repo.id)?;
-            Ok(serde_json::json!({ "deleted": true }).to_string())
-        }
         TopicCommand::Close { id, repo } => {
             let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
             let repo_path = std::path::Path::new(&repo.path);
@@ -114,10 +97,7 @@ pub fn handle(
                     crate::error::RestackError::TopicNotFound(id.parse().unwrap_or_default())
                 })?;
 
-            // Delete remote branch (best-effort)
             let _ = crate::git::branch_delete(repo_path, &topic.branch, true);
-            // Delete local branch (best-effort, may fail if checked out)
-            let _ = crate::git::branch_delete(repo_path, &topic.branch, false);
 
             // Remove from all environments and delete from DB
             crate::db::topic_env_repo::remove_topic_from_all_envs(conn, &topic.id)?;
@@ -125,19 +105,166 @@ pub fn handle(
 
             Ok(serde_json::json!({ "deleted": true, "branch": topic.branch }).to_string())
         }
-        TopicCommand::Archive { id, repo } => {
+        TopicCommand::Promote {
+            topic,
+            env,
+            repo,
+            all,
+        } => {
             let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
-            let topic = crate::db::topic_repo::get_topic_by_branch(conn, &repo.id, id)?
-                .or_else(|| {
-                    id.parse()
-                        .ok()
-                        .and_then(|tid| crate::db::topic_repo::get_topic(conn, &tid).ok())
-                })
-                .ok_or_else(|| {
-                    crate::error::RestackError::TopicNotFound(id.parse().unwrap_or_default())
+            if !no_reconcile {
+                let r_path = std::path::Path::new(&repo.path);
+                if let Some(summary) =
+                    env_sync_service::maybe_reconcile_repo_envs(conn, &repo.id, r_path)?
+                {
+                    eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                }
+            }
+
+            if *all {
+                // When using --all, the env can be passed as the first positional argument
+                // (since topic is optional). Check if topic looks like an env name when env is None.
+                let source_env = env.as_deref().or_else(|| topic.as_deref());
+                return promote_all_topics(conn, &repo, source_env, workspace_root, no_reconcile);
+            }
+
+            let topic = topic.as_ref().ok_or_else(|| {
+                crate::error::RestackError::RepoConfigValidation(
+                    "Must specify a topic or use --all".to_string(),
+                )
+            })?;
+
+            let target_env = match env {
+                Some(e) => e.clone(),
+                None => {
+                    let all_envs = env_repo::list_envs(conn, Some(&repo.id))?;
+                    let topic_obj = topic_repo::get_topic_by_branch(conn, &repo.id, topic)?
+                        .ok_or_else(|| {
+                            crate::error::RestackError::TopicNotFound(
+                                topic.parse().unwrap_or_default(),
+                            )
+                        })?;
+                    let assigned_env_ids = topic_env_repo::get_envs_for_topic(conn, &topic_obj.id)?;
+
+                    let current_lowest_ordinal = assigned_env_ids
+                        .iter()
+                        .filter_map(|env_id| all_envs.iter().find(|e| &e.id == env_id))
+                        .map(|e| e.ordinal)
+                        .min();
+
+                    let next_env = match current_lowest_ordinal {
+                        Some(ord) => all_envs
+                            .iter()
+                            .filter(|e| e.ordinal < ord)
+                            .max_by_key(|e| e.ordinal),
+                        None => all_envs.iter().max_by_key(|e| e.ordinal),
+                    };
+
+                    match next_env {
+                        Some(e) => e.name.clone(),
+                        None => return Err(crate::error::RestackError::RepoConfigValidation(
+                            "No next environment available - topic may already be in highest environment".to_string()
+                        )),
+                    }
+                }
+            };
+
+            let repo_path = std::path::Path::new(&repo.path);
+            let result =
+                promote_service::promote_to(conn, topic, &target_env, &repo.id, repo_path, false)?;
+
+            let all_envs = env_repo::list_envs(conn, Some(&repo.id))?;
+            let is_highest_env = all_envs
+                .iter()
+                .filter(|e| e.name == target_env)
+                .all(|e| all_envs.iter().all(|other| other.ordinal >= e.ordinal));
+
+            if is_highest_env && !all_envs.is_empty() {
+                eprintln!(
+                    "\n✅ Topic '{}' promoted to '{}' (highest environment)",
+                    result.topic.branch, target_env
+                );
+                eprintln!("   Ready for production! Create a PR to merge into the base branch.");
+            }
+
+            Ok(serde_json::to_string_pretty(&result)?)
+        }
+        TopicCommand::Demote {
+            topic,
+            env,
+            repo,
+            all,
+        } => {
+            let repo = repo_service::resolve_repo(conn, repo.as_deref(), workspace_root)?;
+            if !no_reconcile {
+                let r_path = std::path::Path::new(&repo.path);
+                if let Some(summary) =
+                    env_sync_service::maybe_reconcile_repo_envs(conn, &repo.id, r_path)?
+                {
+                    eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+                }
+            }
+
+            if *all {
+                // When using --all, the env can be passed as the first positional argument
+                // (since topic is optional). Use topic as env when env is None.
+                let source_env = env.as_deref().or_else(|| topic.as_deref());
+                return demote_all_topics(conn, &repo, source_env, workspace_root, no_reconcile);
+            }
+
+            let topic = topic.as_ref().ok_or_else(|| {
+                crate::error::RestackError::RepoConfigValidation(
+                    "Must specify a topic or use --all".to_string(),
+                )
+            })?;
+
+            let target_env = match env {
+                Some(e) => e.clone(),
+                None => {
+                    let all_envs = env_repo::list_envs(conn, Some(&repo.id))?;
+                    let topic_obj = topic_repo::get_topic_by_branch(conn, &repo.id, topic)?
+                        .ok_or_else(|| {
+                            crate::error::RestackError::TopicNotFound(
+                                topic.parse().unwrap_or_default(),
+                            )
+                        })?;
+                    let assigned_env_ids = topic_env_repo::get_envs_for_topic(conn, &topic_obj.id)?;
+
+                    let current_env = assigned_env_ids
+                        .iter()
+                        .filter_map(|env_id| all_envs.iter().find(|e| &e.id == env_id))
+                        .min_by_key(|e| e.ordinal);
+
+                    match current_env {
+                        Some(e) => e.name.clone(),
+                        None => {
+                            return Err(crate::error::RestackError::RepoConfigValidation(
+                                "Topic not assigned to any environment".to_string(),
+                            ))
+                        }
+                    }
+                }
+            };
+
+            let repo_path = std::path::Path::new(&repo.path);
+            let result =
+                promote_service::demote_from(conn, topic, &target_env, &repo.id, repo_path, false)?;
+
+            let topic_obj =
+                topic_repo::get_topic_by_branch(conn, &repo.id, topic)?.ok_or_else(|| {
+                    crate::error::RestackError::TopicNotFound(topic.parse().unwrap_or_default())
                 })?;
-            let archived = discovery_service::archive_topic(conn, &topic.id)?;
-            Ok(serde_json::to_string_pretty(&archived)?)
+            let remaining_envs = topic_env_repo::get_envs_for_topic(conn, &topic_obj.id)?;
+
+            if remaining_envs.is_empty() {
+                eprintln!(
+                    "\nℹ️  Topic '{}' is now unassigned from all environments",
+                    result.topic.branch
+                );
+                eprintln!("   The branch still exists but is no longer tracked in any integration environment");
+            }
+
+            Ok(serde_json::to_string_pretty(&result)?)
         }
         TopicCommand::List { repo, all_repos } => {
             // Auto-discover new branches before listing
@@ -223,9 +350,151 @@ pub fn handle(
             let status = topic_service::get_topic_status(conn, id, &repo.id)?;
             Ok(serde_json::to_string_pretty(&status)?)
         }
-        TopicCommand::Envs => {
-            let topic_envs = crate::db::topic_env_repo::list_all_topic_environments(conn)?;
-            Ok(serde_json::to_string_pretty(&topic_envs)?)
+    }
+}
+
+use crate::types::Repo;
+
+fn promote_all_topics(
+    conn: &Connection,
+    repo: &Repo,
+    env: Option<&str>,
+    _workspace_root: &Path,
+    _no_reconcile: bool,
+) -> Result<String> {
+    let _all_envs = env_repo::list_envs(conn, Some(&repo.id))?;
+    let source_env = match env {
+        Some(e) => e.to_string(),
+        None => {
+            return Err(crate::error::RestackError::RepoConfigValidation(
+                "Must specify an environment when using --all".to_string(),
+            ))
+        }
+    };
+
+    let env_obj = env_repo::get_env_by_name(conn, &repo.id, &source_env)?.ok_or_else(|| {
+        crate::error::RestackError::EnvNotFound(source_env.parse().unwrap_or_default())
+    })?;
+
+    let topics = topic_env_repo::get_topics_in_env(conn, &env_obj.id)?;
+
+    if topics.is_empty() {
+        return Ok(serde_json::json!({
+            "message": format!("No topics found in environment '{}'", source_env),
+            "promoted": 0
+        })
+        .to_string());
+    }
+
+    let mut results = Vec::new();
+    let repo_path = std::path::Path::new(&repo.path);
+
+    for topic in &topics {
+        match promote_service::promote_to(
+            conn,
+            &topic.branch,
+            &source_env,
+            &repo.id,
+            repo_path,
+            false,
+        ) {
+            Ok(result) => {
+                results.push(serde_json::json!({
+                    "topic": result.topic.branch,
+                    "status": "promoted",
+                    "to_env": result.env.name
+                }));
+            }
+            Err(e) => {
+                results.push(serde_json::json!({
+                    "topic": topic.branch,
+                    "status": "error",
+                    "error": e.to_string()
+                }));
+            }
         }
     }
+
+    Ok(serde_json::json!({
+        "source_env": source_env,
+        "promoted": results.iter().filter(|r| r["status"] == "promoted").count(),
+        "results": results
+    })
+    .to_string())
+}
+
+fn demote_all_topics(
+    conn: &Connection,
+    repo: &Repo,
+    env: Option<&str>,
+    _workspace_root: &Path,
+    _no_reconcile: bool,
+) -> Result<String> {
+    let _all_envs = env_repo::list_envs(conn, Some(&repo.id))?;
+    let source_env = match env {
+        Some(e) => e.to_string(),
+        None => {
+            return Err(crate::error::RestackError::RepoConfigValidation(
+                "Must specify an environment when using --all".to_string(),
+            ))
+        }
+    };
+
+    let env_obj = env_repo::get_env_by_name(conn, &repo.id, &source_env)?.ok_or_else(|| {
+        crate::error::RestackError::EnvNotFound(source_env.parse().unwrap_or_default())
+    })?;
+
+    let topics = topic_env_repo::get_topics_in_env(conn, &env_obj.id)?;
+
+    if topics.is_empty() {
+        return Ok(serde_json::json!({
+            "message": format!("No topics found in environment '{}'", source_env),
+            "demoted": 0
+        })
+        .to_string());
+    }
+
+    let mut results = Vec::new();
+    let repo_path = std::path::Path::new(&repo.path);
+
+    for topic in &topics {
+        match promote_service::demote_from(
+            conn,
+            &topic.branch,
+            &source_env,
+            &repo.id,
+            repo_path,
+            false,
+        ) {
+            Ok(result) => {
+                results.push(serde_json::json!({
+                    "topic": result.topic.branch,
+                    "status": "demoted",
+                    "from_env": result.env.name
+                }));
+            }
+            Err(e) => {
+                results.push(serde_json::json!({
+                    "topic": topic.branch,
+                    "status": "error",
+                    "error": e.to_string()
+                }));
+            }
+        }
+    }
+
+    let demoted_count = results.iter().filter(|r| r["status"] == "demoted").count();
+    if demoted_count > 0 {
+        eprintln!(
+            "\nℹ️  {} topics demoted from '{}' and are now unassigned",
+            demoted_count, source_env
+        );
+    }
+
+    Ok(serde_json::json!({
+        "source_env": source_env,
+        "demoted": demoted_count,
+        "results": results
+    })
+    .to_string())
 }

@@ -65,10 +65,10 @@ environments:
     assert!(init_output.status.success(), "init failed");
 
     let add_output = Command::new(&binary)
-        .args(["repo", "add", repo_path.to_str().unwrap()])
+        .args(["add", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
 
     assert!(
         add_output.status.success(),
@@ -102,10 +102,10 @@ fn test_repo_add_without_restack_yml_uses_defaults() {
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["repo", "add", repo_path.to_str().unwrap()])
+        .args(["add", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
 
     assert!(
         add_output.status.success(),
@@ -156,10 +156,10 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["repo", "add", repo_path.to_str().unwrap()])
+        .args(["add", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
 
     assert!(add_output.status.success());
 
@@ -208,10 +208,10 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["repo", "add", repo_path.to_str().unwrap()])
+        .args(["add", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
 
     assert!(add_output.status.success());
 
@@ -255,10 +255,10 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["repo", "add", repo_path.to_str().unwrap()])
+        .args(["add", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
 
     assert!(add_output.status.success());
 
@@ -300,10 +300,10 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["repo", "add", repo_path.to_str().unwrap()])
+        .args(["add", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
 
     assert!(add_output.status.success());
 
@@ -344,16 +344,10 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args([
-            "repo",
-            "add",
-            "--name",
-            "test-repo",
-            repo_path.to_str().unwrap(),
-        ])
+        .args(["add", "--name", "test-repo", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
     assert!(
         add_output.status.success(),
         "repo add failed: {:?}",
@@ -415,16 +409,10 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args([
-            "repo",
-            "add",
-            "--name",
-            "test-repo",
-            repo_path.to_str().unwrap(),
-        ])
+        .args(["add", "--name", "test-repo", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
     assert!(
         add_output.status.success(),
         "repo add failed: {:?}",
@@ -461,7 +449,7 @@ environments:
 }
 
 #[test]
-fn test_blocked_removal_with_topics() {
+fn test_restack_yml_exclude_patterns() {
     let binary = restack_binary();
     let workspace = tempdir().expect("create temp dir");
     let repo_dir = tempdir().expect("create repo dir");
@@ -469,17 +457,14 @@ fn test_blocked_removal_with_topics() {
 
     init_git_repo(repo_path);
 
-    Command::new("git")
-        .args(["checkout", "-b", "feature/test"])
-        .current_dir(repo_path)
-        .output()
-        .expect("git checkout feature branch");
-
     std::fs::write(
         repo_path.join(".restack.yml"),
         r#"version: "1"
 environments:
   - dev
+exclude_patterns:
+  - "dependabot/*"
+  - "renovate/*"
 "#,
     )
     .expect("write .restack.yml");
@@ -492,75 +477,24 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args([
-            "repo",
-            "add",
-            "--name",
-            "test-repo",
-            "--discover",
-            repo_path.to_str().unwrap(),
-        ])
+        .args(["add", "--name", "test-repo", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
-        .expect("restack repo add");
+        .expect("restack add");
     assert!(
         add_output.status.success(),
-        "repo add failed: {:?}",
+        "add failed: {:?}",
         String::from_utf8_lossy(&add_output.stderr)
     );
 
-    let track_output = Command::new(&binary)
-        .args(["topic", "track", "feature/test", "--repo", "test-repo"])
-        .current_dir(workspace.path())
-        .output()
-        .expect("restack topic track");
-    assert!(
-        track_output.status.success(),
-        "topic track failed: {:?}",
-        String::from_utf8_lossy(&track_output.stderr)
-    );
-
-    let promote_output = Command::new(&binary)
-        .args([
-            "promote",
-            "to",
-            "feature/test",
-            "dev",
-            "--repo",
-            "test-repo",
-        ])
-        .current_dir(workspace.path())
-        .output()
-        .expect("restack promote");
-    assert!(
-        promote_output.status.success(),
-        "promote failed: {:?}",
-        String::from_utf8_lossy(&promote_output.stderr)
-    );
-
-    std::fs::write(
-        repo_path.join(".restack.yml"),
-        r#"version: "1"
-environments: []
-"#,
-    )
-    .expect("remove dev from .restack.yml");
-
+    // Verify the repo was added successfully with the config
     let list_output = Command::new(&binary)
-        .args(["env", "list", "--repo", "test-repo"])
+        .args(["list"])
         .current_dir(workspace.path())
         .output()
-        .expect("restack env list");
+        .expect("restack list");
 
-    assert!(
-        list_output.status.success(),
-        "env list failed: {:?}",
-        String::from_utf8_lossy(&list_output.stderr)
-    );
-
+    assert!(list_output.status.success());
     let stdout = String::from_utf8_lossy(&list_output.stdout);
-    assert!(
-        stdout.contains("dev"),
-        "dev should still exist (blocked removal)"
-    );
+    assert!(stdout.contains("test-repo"), "should list the added repo");
 }

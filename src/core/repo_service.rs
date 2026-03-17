@@ -46,30 +46,88 @@ pub fn add_repo(
     let provider = git::detect_provider(path).unwrap_or(Provider::Unknown);
     let remote_url = git::get_remote_url(path);
 
-    // Use directory name as default name
+    // Canonicalize path first (needed for both name extraction and storage)
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canonical_path_str = canonical_path.to_string_lossy().to_string();
+
+    // Use directory name as default name (from canonical path to handle ".")
     let repo_name = name.map(|n| n.to_string()).unwrap_or_else(|| {
-        path.file_name()
+        canonical_path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unnamed")
             .to_string()
     });
 
-    let canonical_path = path
-        .canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .to_string_lossy()
-        .to_string();
+    // Check if already registered at this path
+    if let Some(existing_repo) = repo_repo::get_repo_by_path(conn, &canonical_path_str)? {
+        // Path is already tracked - verify it's still a valid git repo
+        let existing_path = Path::new(&existing_repo.path);
+        if existing_path.exists() && existing_path.join(".git").exists() {
+            // Repo already tracked and still valid - return existing info (idempotent)
+            let mut result = serde_json::json!({
+                "repo": existing_repo,
+                "note": "Repository was already tracked",
+            });
 
-    // Check if already registered
-    if repo_repo::get_repo_by_path(conn, &canonical_path)?.is_some() {
-        return Err(RestackError::RepoAlreadyTracked(canonical_path));
+            // Still run reconciliation and discovery even for existing repos
+            let restack_yml_path = path.join(".restack.yml");
+            if restack_yml_path.exists() {
+                if let Ok(config) = crate::config::repo_config::load_repo_config(&restack_yml_path)
+                {
+                    if crate::config::repo_config::validate_version(&config).is_ok()
+                        && crate::config::repo_config::validate_no_duplicate_branches(&config)
+                            .is_ok()
+                        && crate::config::repo_config::validate_production_branch_collision(
+                            &config,
+                            &existing_repo.base_branch,
+                        )
+                        .is_ok()
+                    {
+                        if let Ok(summary) = crate::core::env_sync_service::reconcile_environments(
+                            conn,
+                            &existing_repo.id,
+                            &config,
+                        ) {
+                            if !summary.is_empty() {
+                                result["env_reconcile"] = serde_json::to_value(&summary)?;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Still run discovery if requested
+            if discover {
+                let config_path = workspace_root.join(".restack/config.toml");
+                let cfg = if config_path.exists() {
+                    config::load_config(&config_path).unwrap_or_default()
+                } else {
+                    config::default_config()
+                };
+
+                match discovery_service::discover_topics(conn, &existing_repo.id, path, &cfg) {
+                    Ok(discovery) => {
+                        result["discovery"] = serde_json::to_value(&discovery)?;
+                    }
+                    Err(e) => {
+                        result["discovery_error"] = serde_json::Value::String(e.to_string());
+                    }
+                }
+            } else {
+                result["hint"] = "Use --discover to scan for topics".into();
+            }
+
+            return Ok(result);
+        }
+        // Path exists in DB but no longer valid - will be replaced below
     }
 
     let base_branch = git::detect_default_branch(path);
     let repo = repo_repo::create_repo(
         conn,
         &repo_name,
-        &canonical_path,
+        &canonical_path_str,
         remote_url.as_deref(),
         provider,
         &base_branch,
@@ -109,7 +167,10 @@ pub fn add_repo(
         }
     } else {
         // Generate default .restack.yml and reconcile
-        std::fs::write(&restack_yml_path, crate::config::repo_config::DEFAULT_RESTACK_YML)?;
+        std::fs::write(
+            &restack_yml_path,
+            crate::config::repo_config::DEFAULT_RESTACK_YML,
+        )?;
         let config = crate::config::repo_config::load_repo_config(&restack_yml_path)?;
         let summary =
             crate::core::env_sync_service::reconcile_environments(conn, &repo.id, &config)?;
@@ -225,7 +286,10 @@ pub fn detect_repos(conn: &Connection, workspace_root: &Path) -> Result<DetectRe
         let repo_path = Path::new(&detected.path);
         let restack_yml_path = repo_path.join(".restack.yml");
         if !restack_yml_path.exists() {
-            std::fs::write(&restack_yml_path, crate::config::repo_config::DEFAULT_RESTACK_YML)?;
+            std::fs::write(
+                &restack_yml_path,
+                crate::config::repo_config::DEFAULT_RESTACK_YML,
+            )?;
         }
         let config = crate::config::repo_config::load_repo_config(&restack_yml_path)?;
         crate::core::env_sync_service::reconcile_environments(conn, &repo.id, &config)?;

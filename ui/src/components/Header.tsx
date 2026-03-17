@@ -34,7 +34,8 @@ export function Header() {
   }, [context, repos, selectedRepoId, setSelectedRepoId]);
 
   // Kanban requires a specific repo — auto-select first if "All repos" is active
-  useEffect(() => {
+  // useLayoutEffect to prevent flash of "no repo selected" state
+  useLayoutEffect(() => {
     if (viewMode === "kanban" && selectedRepoId === null && repos && repos.length > 0) {
       setSelectedRepoId(repos[0]!.id);
     }
