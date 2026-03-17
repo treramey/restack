@@ -470,8 +470,9 @@ export function KanbanView() {
       <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted font-mono text-sm p-8">
         <p>No environments configured</p>
         <p className="text-text-dim text-xs">
-          Run <code className="text-accent">restack env add</code> to create
-          one
+          Add a <code className="text-accent">.restack.yml</code> to your
+          repo or run{" "}
+          <code className="text-accent">restack integration add</code>
         </p>
       </div>
     );

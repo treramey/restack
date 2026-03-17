@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use crate::config;
 use crate::config::repo_config;
 use crate::core::discovery_service::{self, RepoSnapshot};
+use crate::core::env_sync_service;
 use crate::core::provider_service;
 use crate::db::{env_repo, repo_repo, topic_env_repo, topic_repo};
 use crate::error::Result;
@@ -165,6 +166,14 @@ pub fn handle_refresh(
     // Phase 3: serial apply (DB writes, single connection)
     let mut json_results = Vec::new();
     for (repo, result) in plan_results {
+        // Reconcile environments from .restack.yml before applying mutations
+        let repo_path = Path::new(&repo.path);
+        if let Ok(Some(summary)) =
+            env_sync_service::maybe_reconcile_repo_envs(conn, &repo.id, repo_path)
+        {
+            eprintln!("{}", env_sync_service::format_reconcile_summary(&summary));
+        }
+
         match result {
             Ok((mutations, mut discovery, fingerprint, merge_data)) => {
                 if !mutations.is_empty() || merge_data.is_some() {
