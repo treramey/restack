@@ -42,7 +42,7 @@ pub enum TopicCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Close a topic: delete from origin and remove from all environments
+    /// Close a topic: delete from origin and remove from all integration branches
     Close {
         /// Topic ID or branch name
         id: String,
@@ -163,7 +163,7 @@ pub fn handle(
                     match next_env {
                         Some(e) => e.name.clone(),
                         None => return Err(crate::error::RestackError::RepoConfigValidation(
-                            "No next environment available - topic may already be in highest environment".to_string()
+                            "No next integration branch available - topic may already be in highest integration branch".to_string()
                         )),
                     }
                 }
@@ -181,7 +181,7 @@ pub fn handle(
 
             if is_highest_env && !all_envs.is_empty() {
                 eprintln!(
-                    "\n✅ Topic '{}' promoted to '{}' (highest environment)",
+                    "\n✅ Topic '{}' promoted to '{}' (highest integration branch)",
                     result.topic.branch, target_env
                 );
                 eprintln!("   Ready for production! Create a PR to merge into the base branch.");
@@ -239,7 +239,7 @@ pub fn handle(
                         Some(e) => e.name.clone(),
                         None => {
                             return Err(crate::error::RestackError::RepoConfigValidation(
-                                "Topic not assigned to any environment".to_string(),
+                                "Topic not assigned to any integration branch".to_string(),
                             ))
                         }
                     }
@@ -258,10 +258,12 @@ pub fn handle(
 
             if remaining_envs.is_empty() {
                 eprintln!(
-                    "\nℹ️  Topic '{}' is now unassigned from all environments",
+                    "\nℹ️  Topic '{}' is now unassigned from all integration branches",
                     result.topic.branch
                 );
-                eprintln!("   The branch still exists but is no longer tracked in any integration environment");
+                eprintln!(
+                    "   The branch still exists but is no longer tracked in any integration branch"
+                );
             }
 
             Ok(serde_json::to_string_pretty(&result)?)
@@ -380,7 +382,7 @@ fn promote_all_topics(
 
     if topics.is_empty() {
         return Ok(serde_json::json!({
-            "message": format!("No topics found in environment '{}'", source_env),
+            "message": format!("No topics found in integration branch '{}'", source_env),
             "promoted": 0
         })
         .to_string());
@@ -448,7 +450,7 @@ fn demote_all_topics(
 
     if topics.is_empty() {
         return Ok(serde_json::json!({
-            "message": format!("No topics found in environment '{}'", source_env),
+            "message": format!("No topics found in integration branch '{}'", source_env),
             "demoted": 0
         })
         .to_string());

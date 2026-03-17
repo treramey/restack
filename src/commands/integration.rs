@@ -17,7 +17,7 @@ pub enum IntegrationCommand {
     Add {
         /// Integration branch name
         name: String,
-        /// Branch name for this environment
+        /// Branch name for this integration
         #[arg(long)]
         branch: String,
         /// Repo ID or name (auto-detected if not specified)
@@ -173,7 +173,7 @@ pub fn handle(
                 Some(r) => r,
                 None => {
                     return Ok(serde_json::to_string_pretty(&serde_json::json!({
-                        "message": "No rebuild found for environment"
+                        "message": "No rebuild found for integration branch"
                     }))?)
                 }
             };
@@ -281,7 +281,7 @@ fn handle_init(
 
     if envs.is_empty() {
         return Ok(serde_json::to_string_pretty(
-            &serde_json::json!({"message": "No environments to initialize."}),
+            &serde_json::json!({"message": "No integration branches to initialize."}),
         )?);
     }
 
@@ -362,7 +362,7 @@ fn prompt_interactive_envs(repo_path: &Path) -> Result<Vec<env_init_service::Env
     }
 
     let confirmed = Confirm::new()
-        .with_prompt("Create these environments?")
+        .with_prompt("Create these integration branches?")
         .default(true)
         .interact()
         .map_err(|e| std::io::Error::other(e))?;
