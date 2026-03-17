@@ -621,7 +621,14 @@ export async function startUiServer(config: UiServerConfig): Promise<void> {
       port: config.port,
     },
     (info) => {
-      console.log(`Restack UI: http://localhost:${info.port}`);
+      const url = `http://localhost:${info.port}`;
+      console.log(`Restack UI: ${url}`);
+
+      // Open browser
+      const open = process.platform === "darwin" ? "open"
+        : process.platform === "win32" ? "start"
+        : "xdg-open";
+      import("node:child_process").then(({ exec }) => exec(`${open} ${url}`));
 
       // Auto-refresh in background: UI loads cached DB data immediately,
       // then updates stream in via WebSocket when refresh completes.
