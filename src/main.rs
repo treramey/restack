@@ -18,8 +18,8 @@ mod version;
 
 use commands::{
     // conflicts::ConflictsCommand,
-    env::EnvCommand,
-    // pr::PrCommand,
+    integration::IntegrationCommand,
+    // pr::ConflictsCommand,
     topic::TopicCommand,
 };
 use output::Printer;
@@ -31,13 +31,13 @@ use output::Printer;
 #[command(
     about = "Restack - Topic branch integration manager",
     long_about = r#"
-Restack - Manage topic branches across integration environments.
+Restack - Manage topic branches across integration branches.
 
 Features:
   • Track topic branches (PRs) across dev/staging/production
   • Two-phase rebuild: staging topics merged first, then dev-only
   • Conflict detection with automatic topic removal
-  • Environment promotion/demotion workflow
+  • Integration branch promotion/demotion workflow
 
 Environment:
   RESTACK_DB_PATH   Override database location
@@ -110,9 +110,9 @@ enum Command {
     #[command(subcommand)]
     Topic(TopicCommand),
 
-    /// Environment management
-    #[command(subcommand)]
-    Env(EnvCommand),
+    /// Integration branch management
+    #[command(subcommand, name = "integration")]
+    Integration(IntegrationCommand),
 
     // /// List conflicts
     // #[command(subcommand)]
@@ -294,10 +294,10 @@ fn run(command: &Command, db_path: &Path, no_reconcile: bool) -> error::Result<S
             let cwd = std::env::current_dir()?;
             commands::topic::handle(&conn, cmd, &cwd, no_reconcile)
         }
-        Command::Env(cmd) => {
+        Command::Integration(cmd) => {
             let conn = db::open_db(db_path)?;
             let cwd = std::env::current_dir()?;
-            commands::env::handle(&conn, cmd, &cwd, no_reconcile)
+            commands::integration::handle(&conn, cmd, &cwd, no_reconcile)
         }
         // Command::Conflicts(cmd) => {
         //     let conn = db::open_db(db_path)?;

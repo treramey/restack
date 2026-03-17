@@ -365,10 +365,10 @@ environments:
     .expect("update .restack.yml");
 
     let list_output = Command::new(&binary)
-        .args(["env", "list", "--repo", "test-repo"])
+        .args(["integration", "list", "--repo", "test-repo"])
         .current_dir(workspace.path())
         .output()
-        .expect("restack env list");
+        .expect("restack integration list");
 
     assert!(
         list_output.status.success(),
@@ -430,10 +430,16 @@ environments:
     .expect("update .restack.yml");
 
     let list_output = Command::new(&binary)
-        .args(["--no-reconcile", "env", "list", "--repo", "test-repo"])
+        .args([
+            "--no-reconcile",
+            "integration",
+            "list",
+            "--repo",
+            "test-repo",
+        ])
         .current_dir(workspace.path())
         .output()
-        .expect("restack env list --no-reconcile");
+        .expect("restack integration list --no-reconcile");
 
     assert!(
         list_output.status.success(),

@@ -16,29 +16,29 @@ use crate::types::Topic;
 #[derive(Subcommand)]
 #[command(disable_help_subcommand = true)]
 pub enum TopicCommand {
-    /// Promote a topic to an environment (auto-promotes to next env if not specified)
+    /// Promote a topic to an integration branch (auto-promotes to next integration branch if not specified)
     Promote {
         /// Topic ID or branch name (omit when using --all)
         topic: Option<String>,
-        /// Target environment name (auto-detects next env if omitted; required when using --all)
+        /// Target integration branch name (auto-detects next integration branch if omitted; required when using --all)
         env: Option<String>,
         /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
         repo: Option<String>,
-        /// Promote all topics in the specified environment (requires env argument)
+        /// Promote all topics in the specified integration branch (requires integration branch argument)
         #[arg(long)]
         all: bool,
     },
-    /// Demote a topic from an environment (auto-demotes from current env if not specified)
+    /// Demote a topic from an integration branch (auto-demotes from current integration branch if not specified)
     Demote {
         /// Topic ID or branch name (omit when using --all)
         topic: Option<String>,
-        /// Environment name to remove from (auto-detects current env if omitted; required when using --all)
+        /// Integration branch name to remove from (auto-detects current integration branch if omitted; required when using --all)
         env: Option<String>,
         /// Repo ID or name (auto-detected if not specified)
         #[arg(long)]
         repo: Option<String>,
-        /// Demote all topics from the specified environment (requires env argument)
+        /// Demote all topics from the specified integration branch (requires integration branch argument)
         #[arg(long)]
         all: bool,
     },
@@ -367,7 +367,7 @@ fn promote_all_topics(
         Some(e) => e.to_string(),
         None => {
             return Err(crate::error::RestackError::RepoConfigValidation(
-                "Must specify an environment when using --all".to_string(),
+                "Must specify an integration branch when using --all".to_string(),
             ))
         }
     };
@@ -435,7 +435,7 @@ fn demote_all_topics(
         Some(e) => e.to_string(),
         None => {
             return Err(crate::error::RestackError::RepoConfigValidation(
-                "Must specify an environment when using --all".to_string(),
+                "Must specify an integration branch when using --all".to_string(),
             ))
         }
     };

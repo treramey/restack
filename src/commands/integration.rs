@@ -12,10 +12,10 @@ use crate::types::Environment;
 
 #[derive(Subcommand)]
 #[command(disable_help_subcommand = true)]
-pub enum EnvCommand {
-    /// Add an environment
+pub enum IntegrationCommand {
+    /// Add an integration branch
     Add {
-        /// Environment name
+        /// Integration branch name
         name: String,
         /// Branch name for this environment
         #[arg(long)]
@@ -27,23 +27,23 @@ pub enum EnvCommand {
         #[arg(long, default_value = "0")]
         ordinal: i32,
     },
-    /// List environments
+    /// List integration branches
     List {
         /// Filter by repo ID
         #[arg(long)]
         repo: Option<String>,
-        /// List environments across all tracked repos
+        /// List integration branches across all tracked repos
         #[arg(long)]
         all_repos: bool,
     },
-    /// Show environment status
+    /// Show integration branch status
     Status {
-        /// Environment ID
+        /// Integration branch ID
         id: String,
     },
-    /// Override CI status for an environment (force-clear a failed/pending state)
+    /// Override CI status for an integration branch (force-clear a failed/pending state)
     CiOverride {
-        /// Environment name
+        /// Integration branch name
         env_name: String,
         /// Repo ID (auto-resolved if single repo in workspace)
         #[arg(long)]
@@ -51,21 +51,21 @@ pub enum EnvCommand {
     },
     /// Blame CI failure: identify the likely culprit topic
     Blame {
-        /// Environment name
+        /// Integration branch name
         env_name: String,
         /// Repo ID (auto-resolved if single repo in workspace)
         #[arg(long)]
         repo: Option<String>,
     },
-    /// Show speculative CI status for an environment
+    /// Show speculative CI status for an integration branch
     SpeculativeStatus {
-        /// Environment name
+        /// Integration branch name
         env_name: String,
         /// Repo ID (auto-resolved if single repo in workspace)
         #[arg(long)]
         repo: Option<String>,
     },
-    /// Initialize integration environments (create branches + register)
+    /// Initialize integration branches (create branches + register)
     Init {
         /// Repo ID (auto-resolved if single repo in workspace)
         #[arg(long)]
@@ -77,7 +77,7 @@ pub enum EnvCommand {
         #[arg(long)]
         push: bool,
     },
-    /// Rebuild all integration environments for the current repo
+    /// Rebuild all integration branches for the current repo
     Rebuild,
 }
 
@@ -91,12 +91,12 @@ struct MultiRepoEnvs {
 
 pub fn handle(
     conn: &Connection,
-    cmd: &EnvCommand,
+    cmd: &IntegrationCommand,
     cwd: &Path,
     no_reconcile: bool,
 ) -> Result<String> {
     match cmd {
-        EnvCommand::Add {
+        IntegrationCommand::Add {
             name,
             branch,
             repo,
@@ -106,7 +106,7 @@ pub fn handle(
             let env = env_service::add_env(conn, &repo.id, name, branch, *ordinal)?;
             Ok(serde_json::to_string_pretty(&env)?)
         }
-        EnvCommand::List { repo, all_repos } => {
+        IntegrationCommand::List { repo, all_repos } => {
             if *all_repos {
                 if !no_reconcile {
                     let repos = repo_repo::list_repos(conn)?;
@@ -144,14 +144,14 @@ pub fn handle(
                 Ok(serde_json::to_string_pretty(&envs)?)
             }
         }
-        EnvCommand::Status { id } => {
+        IntegrationCommand::Status { id } => {
             let env_id = id
                 .parse()
                 .map_err(|_| crate::error::RestackError::EnvNotFound(crate::id::EnvId::new()))?;
             let status = env_service::get_env_status(conn, &env_id)?;
             Ok(serde_json::to_string_pretty(&status)?)
         }
-        EnvCommand::CiOverride { env_name, repo } => {
+        IntegrationCommand::CiOverride { env_name, repo } => {
             let repo_obj = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
             if !no_reconcile {
                 let repo_path = Path::new(&repo_obj.path);
@@ -189,7 +189,7 @@ pub fn handle(
                 "rebuild_id": rebuild.id,
             }))?)
         }
-        EnvCommand::Blame { env_name, repo } => {
+        IntegrationCommand::Blame { env_name, repo } => {
             let repo_obj = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
             if !no_reconcile {
                 let repo_path = Path::new(&repo_obj.path);
@@ -212,7 +212,7 @@ pub fn handle(
             )?;
             Ok(serde_json::to_string_pretty(&result)?)
         }
-        EnvCommand::SpeculativeStatus { env_name, repo } => {
+        IntegrationCommand::SpeculativeStatus { env_name, repo } => {
             let repo_obj = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
             if !no_reconcile {
                 let repo_path = Path::new(&repo_obj.path);
@@ -235,7 +235,7 @@ pub fn handle(
             )?;
             Ok(serde_json::to_string_pretty(&result)?)
         }
-        EnvCommand::Init {
+        IntegrationCommand::Init {
             repo,
             interactive,
             push,
@@ -243,7 +243,7 @@ pub fn handle(
             let repo = repo_service::resolve_repo(conn, repo.as_deref(), cwd)?;
             handle_init(conn, cwd, &repo, *interactive, *push)
         }
-        EnvCommand::Rebuild => {
+        IntegrationCommand::Rebuild => {
             let repo = repo_service::resolve_repo(conn, None, cwd)?;
             let repo_path = std::path::PathBuf::from(&repo.path);
             let envs = env_repo::list_envs(conn, Some(&repo.id))?;
@@ -335,7 +335,7 @@ fn prompt_interactive_envs(repo_path: &Path) -> Result<Vec<env_init_service::Env
         let branch = &all_branches[idx].0;
 
         let name: String = Input::new()
-            .with_prompt(format!("Environment name for '{}'", branch))
+            .with_prompt(format!("Integration branch name for '{}'", branch))
             .default(branch.clone())
             .interact_text()
             .map_err(|e| std::io::Error::other(e))?;
