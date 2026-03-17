@@ -11,7 +11,7 @@ import { useWebSocketSync } from "./lib/websocket.js";
 import { Header } from "./components/Header.js";
 import { DetailPanel } from "./components/DetailPanel.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
-import { KanbanView } from "./components/views/KanbanView.js";
+import { KanbanView } from "./components/views/kanban/KanbanView.js";
 import { ListView } from "./components/views/ListView.js";
 import { Toaster } from "sonner";
 
