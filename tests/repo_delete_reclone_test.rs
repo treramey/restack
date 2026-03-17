@@ -47,7 +47,7 @@ fn test_repo_add_after_external_delete_and_reclone() {
 
     // Add the repo
     let add_output = restack_cmd()
-        .args(["add", repo_dir.to_str().unwrap()])
+        .args(["add", "--json", repo_dir.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -80,7 +80,7 @@ fn test_repo_add_after_external_delete_and_reclone() {
 
     // Try to add again - with the fix, this should now succeed
     let add_output2 = restack_cmd()
-        .args(["add", repo_dir.to_str().unwrap()])
+        .args(["add", "--json", repo_dir.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add after reclone");

@@ -33,7 +33,7 @@ fn test_repo_add_cli_always_discovers() {
     );
 
     let add_output = Command::new(&binary)
-        .args(["add", repo_dir.path().to_str().unwrap()])
+        .args(["add", "--json", repo_dir.path().to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -94,7 +94,7 @@ fn test_repo_add_cli_with_feature_branch() {
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["add", repo_dir.path().to_str().unwrap()])
+        .args(["add", "--json", repo_dir.path().to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");

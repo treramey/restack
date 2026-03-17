@@ -40,7 +40,7 @@ fn test_repo_add_twice_succeeds_with_note() {
 
     // First add should succeed
     let add_output = restack_cmd()
-        .args(["add", repo_dir.path().to_str().unwrap()])
+        .args(["add", "--json", repo_dir.path().to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -53,7 +53,7 @@ fn test_repo_add_twice_succeeds_with_note() {
 
     // Second add should also succeed (idempotent) with note
     let add_output2 = restack_cmd()
-        .args(["add", repo_dir.path().to_str().unwrap()])
+        .args(["add", "--json", repo_dir.path().to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add 2");
@@ -105,7 +105,7 @@ fn test_repo_add_with_trailing_slash_is_idempotent() {
     // Add with trailing slash
     let repo_path_with_slash = format!("{}/", repo_dir.path().to_str().unwrap());
     let add_output = restack_cmd()
-        .args(["add", &repo_path_with_slash])
+        .args(["add", "--json", &repo_path_with_slash])
         .current_dir(workspace.path())
         .output()
         .expect("restack add with slash");
@@ -117,7 +117,7 @@ fn test_repo_add_with_trailing_slash_is_idempotent() {
 
     // Try to add again without trailing slash - should succeed idempotently
     let add_output2 = restack_cmd()
-        .args(["add", repo_dir.path().to_str().unwrap()])
+        .args(["add", "--json", repo_dir.path().to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add without slash");
@@ -174,7 +174,7 @@ fn test_repo_add_relative_path_from_parent_dir_is_idempotent() {
 
     // Add with relative path including trailing slash
     let add_output = restack_cmd()
-        .args(["add", "gitworkflow-cli-test/"])
+        .args(["add", "--json", "gitworkflow-cli-test/"])
         .current_dir(workspace.path())
         .output()
         .expect("restack add with relative path");
@@ -187,7 +187,7 @@ fn test_repo_add_relative_path_from_parent_dir_is_idempotent() {
 
     // Try to add again - should succeed idempotently
     let add_output2 = restack_cmd()
-        .args(["add", "gitworkflow-cli-test/"])
+        .args(["add", "--json", "gitworkflow-cli-test/"])
         .current_dir(workspace.path())
         .output()
         .expect("restack add second time");
@@ -258,7 +258,7 @@ fn test_repo_add_parent_dir_then_child_dir_both_succeed() {
 
     // Add parent directory (work/)
     let add_output = restack_cmd()
-        .args(["add", parent_dir.to_str().unwrap()])
+        .args(["add", "--json", parent_dir.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add parent");
@@ -271,7 +271,7 @@ fn test_repo_add_parent_dir_then_child_dir_both_succeed() {
     // Try to add child directory (work/gitworkflow-cli-test/)
     // This SHOULD succeed because it's a different path
     let add_output2 = restack_cmd()
-        .args(["add", child_dir.to_str().unwrap()])
+        .args(["add", "--json", child_dir.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add child");

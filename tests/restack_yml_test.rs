@@ -65,7 +65,7 @@ environments:
     assert!(init_output.status.success(), "init failed");
 
     let add_output = Command::new(&binary)
-        .args(["add", repo_path.to_str().unwrap()])
+        .args(["add", "--json", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -102,7 +102,7 @@ fn test_repo_add_without_restack_yml_uses_defaults() {
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["add", repo_path.to_str().unwrap()])
+        .args(["add", "--json", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -156,7 +156,7 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["add", repo_path.to_str().unwrap()])
+        .args(["add", "--json", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -208,7 +208,7 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["add", repo_path.to_str().unwrap()])
+        .args(["add", "--json", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -255,7 +255,7 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["add", repo_path.to_str().unwrap()])
+        .args(["add", "--json", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -300,7 +300,7 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["add", repo_path.to_str().unwrap()])
+        .args(["add", "--json", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -344,7 +344,7 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["add", "--name", "test-repo", repo_path.to_str().unwrap()])
+        .args(["add", "--json", "--name", "test-repo", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -409,7 +409,7 @@ environments:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["add", "--name", "test-repo", repo_path.to_str().unwrap()])
+        .args(["add", "--json", "--name", "test-repo", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");
@@ -483,7 +483,7 @@ exclude_patterns:
     assert!(init_output.status.success());
 
     let add_output = Command::new(&binary)
-        .args(["add", "--name", "test-repo", repo_path.to_str().unwrap()])
+        .args(["add", "--json", "--name", "test-repo", repo_path.to_str().unwrap()])
         .current_dir(workspace.path())
         .output()
         .expect("restack add");

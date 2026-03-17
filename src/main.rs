@@ -10,6 +10,7 @@ mod config;
 mod core;
 mod db;
 mod error;
+mod format;
 mod git;
 mod id;
 mod output;
@@ -87,9 +88,9 @@ enum Command {
 
     /// Add a repository to the workspace
     Add {
-        /// Path to the repository (defaults to current directory)
-        #[arg(default_value = ".")]
-        path: String,
+        /// Path to the repository
+        #[arg(required_unless_present = "all")]
+        path: Option<String>,
         /// Optional name for the repository (defaults to directory name)
         #[arg(short, long)]
         name: Option<String>,
@@ -378,7 +379,8 @@ fn main() {
                 println!("{}", output);
             } else {
                 let printer = Printer::new(cli.no_color);
-                printer.print_json(&output);
+                let formatted = format::format_human(&cli.command, &output, &printer);
+                println!("{}", formatted);
             }
         }
         Err(e) => {
@@ -431,6 +433,7 @@ fn run_with_conn(
                 return Ok(serde_json::to_string_pretty(&result)?);
             }
 
+            let path = path.as_deref().expect("path required unless --all");
             let result =
                 core::repo_service::add_repo(conn, &workspace_root, path, name.as_deref(), true)?;
             Ok(serde_json::to_string_pretty(&result)?)

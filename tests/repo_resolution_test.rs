@@ -46,7 +46,7 @@ fn test_topic_list_auto_detects_from_repo_dir() {
     assert!(add_output.status.success());
 
     let list_output = restack_cmd()
-        .args(["topic", "list"])
+        .args(["topic", "list", "--json"])
         .current_dir(repo_dir.path())
         .output()
         .expect("restack topic list");
@@ -122,7 +122,7 @@ fn test_error_when_not_in_repo_and_no_repo_arg() {
         .expect("restack init");
 
     let list_output = restack_cmd()
-        .args(["topic", "list"])
+        .args(["topic", "list", "--json"])
         .current_dir(workspace.path())
         .output()
         .expect("restack topic list");
