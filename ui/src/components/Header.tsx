@@ -23,6 +23,16 @@ export function Header() {
   const { data: repos } = useRepos();
   const { data: context } = useContext();
 
+  // Validate persisted selectedRepoId still exists (repo may have been re-added
+  // with a new ID). Clear stale ID so the auto-select effects below can fire.
+  useEffect(() => {
+    if (selectedRepoId && repos && repos.length > 0) {
+      if (!repos.some((r) => r.id === selectedRepoId)) {
+        setSelectedRepoId(null);
+      }
+    }
+  }, [repos, selectedRepoId, setSelectedRepoId]);
+
   // Auto-select repo from context on initial load
   useEffect(() => {
     if (context?.repoName && repos && selectedRepoId === null) {

@@ -10,6 +10,7 @@ import { queryKeys } from "./queries.js";
 import { announce } from "./announce.js";
 import type {
   EnvId,
+  Topic,
   TopicId,
   TopicEnvironment,
   SyncResult,
@@ -181,13 +182,49 @@ export function useCloseTopic() {
       apiFetch<{ deleted: boolean; branch: string }>(`/api/topics/${topicId}/close?repo=${encodeURIComponent(repoId)}`, {
         method: "POST",
       }),
+    onMutate: async ({ topicId }) => {
+      await qc.cancelQueries({ queryKey: queryKeys.topics.all });
+      await qc.cancelQueries({ queryKey: queryKeys.topicEnvironments.all });
+
+      const previousTopics = qc.getQueryData<Topic[]>(queryKeys.topics.list());
+      const previousTopicEnvs = qc.getQueryData<TopicEnvironment[]>(
+        queryKeys.topicEnvironments.list()
+      );
+
+      if (previousTopics) {
+        qc.setQueryData(
+          queryKeys.topics.list(),
+          previousTopics.filter((t) => t.id !== topicId)
+        );
+      }
+      if (previousTopicEnvs) {
+        qc.setQueryData(
+          queryKeys.topicEnvironments.list(),
+          previousTopicEnvs.filter((te) => te.topicId !== topicId)
+        );
+      }
+
+      return { previousTopics, previousTopicEnvs };
+    },
+    onError: (err, _variables, context) => {
+      if (context?.previousTopics) {
+        qc.setQueryData(queryKeys.topics.list(), context.previousTopics);
+      }
+      if (context?.previousTopicEnvs) {
+        qc.setQueryData(queryKeys.topicEnvironments.list(), context.previousTopicEnvs);
+      }
+      toast.error("Close failed", { description: err.message });
+      announce(`Close failed: ${err.message}`);
+    },
     onSuccess: (result) => {
-      void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
-      void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });
       toast.success("Topic closed", {
         description: `Branch ${result.branch} deleted from origin and local`,
       });
       announce(`Topic closed: branch ${result.branch} deleted`);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.topics.all });
+      void qc.invalidateQueries({ queryKey: queryKeys.topicEnvironments.all });
     },
   });
 }
