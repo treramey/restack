@@ -49,3 +49,12 @@ export const REBUILD_COLOR: Record<RebuildStatus, string> = {
   partial: "text-rebuild-partial",
   failed: "text-rebuild-failed",
 };
+
+/** Map an environment name to its CSS color variable value. */
+export function getEnvColor(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes("dev")) return "var(--color-env-dev)";
+  if (lower.includes("stag")) return "var(--color-env-staging)";
+  if (lower.includes("prod")) return "var(--color-env-production)";
+  return "var(--color-accent)";
+}

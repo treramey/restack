@@ -36,8 +36,9 @@ export function Header() {
   // Kanban requires a specific repo — auto-select first if "All repos" is active
   // useLayoutEffect to prevent flash of "no repo selected" state
   useLayoutEffect(() => {
-    if (viewMode === "kanban" && selectedRepoId === null && repos && repos.length > 0) {
-      setSelectedRepoId(repos[0]!.id);
+    const firstRepo = repos?.[0];
+    if (viewMode === "kanban" && selectedRepoId === null && firstRepo) {
+      setSelectedRepoId(firstRepo.id);
     }
   }, [viewMode, selectedRepoId, repos, setSelectedRepoId]);
 
@@ -88,7 +89,7 @@ export function Header() {
       {/* Repo count */}
       {repos && (
         <span className="text-xs text-text-dim font-mono">
-          {repos.length} repo{repos.length !== 1 ? "s" : ""}
+          {repos.length === 0 ? "no repos" : `${repos.length} repo${repos.length !== 1 ? "s" : ""}`}
         </span>
       )}
     </header>

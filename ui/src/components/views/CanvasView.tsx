@@ -216,7 +216,7 @@ const RepoNodeComponent = memo(function RepoNodeComponent({
           <span className="text-[10px] font-mono text-text-dim truncate">{repo.baseBranch}</span>
         </div>
         {badge && (
-          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-surface-secondary text-text-dim border border-border shrink-0">
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-secondary text-text-dim border border-border shrink-0">
             {badge}
           </span>
         )}
@@ -252,13 +252,13 @@ const TopicNodeComponent = memo(function TopicNodeComponent({
           <span className="text-xs font-mono text-text-primary truncate">{topic.branch}</span>
           <div className="flex items-center gap-1.5">
             <span
-              className="text-[9px] font-mono px-1 py-0.5 rounded"
+              className="text-[10px] font-mono px-1 py-0.5 rounded"
               style={{ backgroundColor: `color-mix(in oklch, ${envColor} 20%, transparent)`, color: envColor }}
             >
               {envLabel}
             </span>
             {topic.status === "conflict" && (
-              <span className="text-[9px] font-mono text-text-dim">conflict</span>
+              <span className="text-[10px] font-mono text-text-dim">conflict</span>
             )}
           </div>
         </div>
@@ -368,38 +368,7 @@ export function CanvasView() {
     [setSelectedRepoId, setSelectedTopicId],
   );
 
-  if (reposLoading || topicsLoading) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-text-muted p-8">
-        <p className="font-mono uppercase tracking-wider text-sm animate-ghost-pulse">Loading graph…</p>
-      </div>
-    );
-  }
-
-  if (!repos || repos.length === 0) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-text-muted p-8">
-        {/* Graph placeholder icon */}
-        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="text-text-dim" aria-hidden="true">
-          <circle cx="24" cy="8" r="4" stroke="currentColor" strokeWidth="1.5" />
-          <circle cx="12" cy="28" r="4" stroke="currentColor" strokeWidth="1.5" />
-          <circle cx="36" cy="28" r="4" stroke="currentColor" strokeWidth="1.5" />
-          <circle cx="20" cy="44" r="3" stroke="currentColor" strokeWidth="1.5" />
-          <circle cx="36" cy="44" r="3" stroke="currentColor" strokeWidth="1.5" />
-          <line x1="24" y1="12" x2="12" y2="24" stroke="currentColor" strokeWidth="1.2" />
-          <line x1="24" y1="12" x2="36" y2="24" stroke="currentColor" strokeWidth="1.2" />
-          <line x1="36" y1="32" x2="36" y2="41" stroke="currentColor" strokeWidth="1.2" />
-          <line x1="12" y1="32" x2="20" y2="41" stroke="currentColor" strokeWidth="1.2" />
-        </svg>
-        <p className="font-mono uppercase tracking-wider text-sm">No repos tracked</p>
-        <p className="text-text-dim text-xs font-mono max-w-xs text-center">
-          Your repo &rarr; topic dependency graph will appear here.
-          Run <code className="text-text-muted">restack repo add</code> to begin.
-        </p>
-      </div>
-    );
-  }
-
+  // Touch hint state — hooks must be called before any early returns
   const isTouch = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
   const [hintDismissed, setHintDismissed] = useState(() =>
     typeof sessionStorage !== "undefined" && sessionStorage.getItem("canvas-hint-dismissed") === "1",
@@ -410,13 +379,45 @@ export function CanvasView() {
     sessionStorage.setItem("canvas-hint-dismissed", "1");
   }, []);
 
-  // Auto-dismiss after first interaction
   useEffect(() => {
     if (hintDismissed || !isTouch) return;
     const dismiss = () => dismissHint();
     window.addEventListener("touchmove", dismiss, { once: true });
     return () => window.removeEventListener("touchmove", dismiss);
   }, [hintDismissed, isTouch, dismissHint]);
+
+  if (reposLoading || topicsLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-text-muted p-4 sm:p-8">
+        <p className="font-mono uppercase tracking-wider text-sm animate-ghost-pulse">Loading graph…</p>
+      </div>
+    );
+  }
+
+  if (!repos || repos.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 sm:gap-8 text-text-muted p-4 sm:p-8 animate-fade-in">
+        {/* Graph placeholder icon */}
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="text-text-muted" aria-hidden="true">
+          <circle cx="24" cy="8" r="4" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="12" cy="28" r="4" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="36" cy="28" r="4" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="20" cy="44" r="3" stroke="currentColor" strokeWidth="1.5" />
+          <circle cx="36" cy="44" r="3" stroke="currentColor" strokeWidth="1.5" />
+          <line x1="24" y1="12" x2="12" y2="24" stroke="currentColor" strokeWidth="1.2" />
+          <line x1="24" y1="12" x2="36" y2="24" stroke="currentColor" strokeWidth="1.2" />
+          <line x1="36" y1="32" x2="36" y2="41" stroke="currentColor" strokeWidth="1.2" />
+          <line x1="12" y1="32" x2="20" y2="41" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+        <p className="font-mono uppercase tracking-wider text-sm">No repositories tracked</p>
+        <p className="text-text-muted text-xs font-mono max-w-xs text-center">
+          Your branch dependency graph will appear here.
+          Click <span className="text-accent">Sync</span> above or run{" "}
+          <code className="text-accent">restack sync</code> to get started.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full min-h-0" role="region" aria-label="Repository dependency graph">

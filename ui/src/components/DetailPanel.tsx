@@ -13,18 +13,10 @@ import {
 } from "../lib/store.js";
 import { useTopics, useEnvironments, useTopicEnvironments, useRepos, useConflicts } from "../lib/queries.js";
 import { usePromote, useDemote, useCreatePr, useCloseTopic } from "../lib/mutations.js";
-import { STATUS_BADGE, CI_BADGE } from "../lib/badges.js";
+import { STATUS_BADGE, CI_BADGE, getEnvColor } from "../lib/badges.js";
+import { ActionButton } from "./views/kanban/ActionButton.js";
 import { Badge } from "./Badge.js";
 import type { TopicStatus, CiStatus } from "../generated/types.js";
-
-/** Map an environment name to its CSS color variable value. */
-function getEnvColor(name: string): string {
-  const lower = name.toLowerCase();
-  if (lower.includes("dev")) return "var(--color-env-dev)";
-  if (lower.includes("stag")) return "var(--color-env-staging)";
-  if (lower.includes("prod")) return "var(--color-env-production)";
-  return "var(--color-accent)";
-}
 
 const COLLAPSED_HEIGHT = 40;
 
@@ -52,6 +44,10 @@ export function DetailPanel() {
   const { data: topicEnvs } = useTopicEnvironments();
   const { data: repos } = useRepos();
   const { data: conflicts } = useConflicts();
+
+  // Hide panel entirely when there's no data — "No topic selected" adds nothing
+  // when there are no topics to select. All hooks must remain above this return.
+  const hasTopics = topics && topics.length > 0;
 
   const promote = usePromote();
   const demote = useDemote();
@@ -135,6 +131,8 @@ export function DetailPanel() {
       }
     }
   }, [detailPanelOpen]);
+
+  if (!hasTopics) return null;
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!detailPanelOpen || !panelRef.current) return;
@@ -264,7 +262,7 @@ export function DetailPanel() {
                 <dd className="flex items-center gap-2 flex-wrap">
                   {/* Promote: in an env and there's a next env */}
                   {highestEnv !== null && nextEnv !== null && !isGraduated && (
-                    <DetailActionButton
+                    <ActionButton
                       label={`→ ${nextEnv.name}`}
                       title={`Promote to ${nextEnv.name}`}
                       disabled={isMutating}
@@ -277,7 +275,7 @@ export function DetailPanel() {
                   )}
                   {/* Graduate: in last env and not graduated */}
                   {isInLastEnv && !isGraduated && selectedTopic && selectedRepo && (
-                    <DetailActionButton
+                    <ActionButton
                       label="Create PR →"
                       title="Create PR to merge into base branch"
                       disabled={isMutating}
@@ -293,7 +291,7 @@ export function DetailPanel() {
                   )}
                   {/* Demote: move back to unassigned (remove from environment) */}
                   {highestEnv !== null && !isGraduated && (
-                    <DetailActionButton
+                    <ActionButton
                       label="Demote"
                       title="Remove from environment"
                       disabled={isMutating}
@@ -307,7 +305,7 @@ export function DetailPanel() {
                   )}
                   {/* Promote to first env: unassigned and not graduated */}
                   {isUnassigned && !isGraduated && firstEnv !== null && selectedTopic && (
-                    <DetailActionButton
+                    <ActionButton
                       label={`→ ${firstEnv.name}`}
                       title={`Promote to ${firstEnv.name}`}
                       disabled={isMutating}
@@ -320,7 +318,7 @@ export function DetailPanel() {
                   )}
                   {/* Close: delete branch on local and origin */}
                   {isUnassigned && !isGraduated && selectedTopic && (
-                    <DetailActionButton
+                    <ActionButton
                       label="Close"
                       title="Delete branch from local and origin"
                       disabled={isMutating}
@@ -330,7 +328,7 @@ export function DetailPanel() {
                   )}
                   {/* Clean up branch: graduated and unassigned */}
                   {isUnassigned && isGraduated && selectedTopic && (
-                    <DetailActionButton
+                    <ActionButton
                       label="Clean up branch"
                       title="Delete branch (already merged)"
                       disabled={isMutating}
@@ -462,7 +460,7 @@ export function DetailPanel() {
           ) : (
             <div className="h-full flex flex-col items-center justify-center gap-1 animate-fade-in">
               <span className="text-text-muted text-sm font-mono">No topic selected</span>
-              <span className="text-text-dim text-xs font-mono">Click a card or press <kbd aria-hidden="true" className="px-1 py-0.5 rounded bg-surface-primary border border-border text-[10px]">Enter</kbd> to inspect</span>
+              <span className="text-text-muted text-xs font-mono">Click a card or press <kbd aria-hidden="true" className="px-1 py-0.5 rounded bg-surface-primary border border-border text-[10px]">Enter</kbd> to view details</span>
             </div>
           )}
         </div>
@@ -564,36 +562,3 @@ function CloseConfirmInline({
   );
 }
 
-function DetailActionButton({
-  label,
-  title,
-  disabled,
-  onClick,
-  variant = "default",
-}: {
-  label: string;
-  title: string;
-  disabled: boolean;
-  onClick: () => void;
-  variant?: "default" | "danger";
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      disabled={disabled}
-      onClick={onClick}
-      className={`
-        text-[10px] font-mono px-2.5 py-1.5 min-h-[36px] inline-flex items-center rounded border cursor-pointer
-        transition-colors disabled:opacity-40 disabled:cursor-not-allowed
-        ${
-          variant === "danger"
-            ? "border-status-conflict/30 text-status-conflict/70 hover:text-status-conflict hover:bg-status-conflict/10"
-            : "border-border text-text-muted hover:text-text-primary hover:bg-surface-secondary"
-        }
-      `}
-    >
-      {label}
-    </button>
-  );
-}

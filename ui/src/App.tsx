@@ -53,8 +53,8 @@ export function App() {
     <div className="flex flex-col h-screen bg-bg-primary text-text-primary">
       <Header />
 
-      <main className="flex-1 flex flex-col min-h-0" aria-label={`${viewMode} view`}>
-        <div className="flex-1 min-h-0 flex">
+      <main className="flex-1 flex flex-col min-h-0" aria-label={`${viewMode} view`} aria-live="polite">
+        <div key={viewMode} className="flex-1 min-h-0 flex animate-fade-in">
           <ErrorBoundary>
             <ViewContainer viewMode={viewMode} />
           </ErrorBoundary>

@@ -21,7 +21,7 @@ import type {
   TopicId,
   EnvId,
 } from "../../generated/types.js";
-import { STATUS_BADGE, CI_BADGE, ORIGIN_BADGE } from "../../lib/badges.js";
+import { STATUS_BADGE, CI_BADGE, ORIGIN_BADGE, getEnvColor } from "../../lib/badges.js";
 import { Badge } from "../Badge.js";
 
 // ── Sort config ──────────────────────────────────────────────────────
@@ -163,11 +163,53 @@ export function ListView() {
     [setSelectedTopicId],
   );
 
-  if (!topics || topics.length === 0) {
+  // Loading state — data not yet fetched
+  if (!topics || !repos) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-text-muted p-8">
-        <p className="font-mono uppercase tracking-wider text-sm">No topics</p>
-        <p className="text-text-dim text-xs font-mono">Run `restack topic add` to begin</p>
+      <div className="flex-1 flex items-center justify-center">
+        <div className="w-16 h-1 rounded-full bg-border animate-skeleton-pulse" />
+      </div>
+    );
+  }
+
+  if (topics.length === 0) {
+    const isNoRepos = repos.length === 0;
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 sm:gap-8 p-4 sm:p-8 font-mono animate-fade-in">
+        {/* Ghost table header */}
+        <div className="w-full max-w-2xl opacity-[0.07] pointer-events-none select-none animate-stagger-in" aria-hidden="true">
+          <div className="flex gap-4 px-3 py-2 border-b border-text-primary">
+            {["Repo", "Branch", "Status", "CI", "Envs", "Created"].map((col, i) => (
+              <div key={col} className={`text-[11px] uppercase tracking-wider text-text-primary flex-1 ${i >= 3 ? "hidden sm:block" : ""}`}>{col}</div>
+            ))}
+          </div>
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="flex gap-4 px-3 py-3 border-b border-dashed border-text-primary">
+              {Array.from({ length: 6 }, (_, j) => (
+                <div key={j} className={`flex-1 h-3 rounded bg-text-primary/50 ${j >= 3 ? "hidden sm:block" : ""}`} style={{ width: `${55 + ((i * 3 + j) % 5) * 10}%` }} />
+              ))}
+            </div>
+          ))}
+        </div>
+        {/* Message */}
+        <div className="flex flex-col items-center gap-1.5 text-center">
+          {isNoRepos ? (
+            <>
+              <p className="text-text-muted text-sm uppercase tracking-wider">No repositories tracked</p>
+              <p className="text-text-muted text-xs">
+                Click <span className="text-accent">Sync</span> above or run{" "}
+                <code className="text-accent">restack sync</code> to get started
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-text-muted text-sm uppercase tracking-wider">No topics</p>
+              <p className="text-text-muted text-xs">
+                Run <code className="text-accent">restack topic add</code> to track a branch
+              </p>
+            </>
+          )}
+        </div>
       </div>
     );
   }
@@ -263,14 +305,22 @@ export function ListView() {
                   <td className="w-[180px] px-4 py-2.5">
                     <span className="flex flex-wrap gap-1">
                       {row.envNames.length > 0 ? (
-                        row.envNames.map((name) => (
-                          <span
-                            key={`${row.topic.id}-${name}`}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-surface-secondary border border-border text-text-muted"
-                          >
-                            {name}
-                          </span>
-                        ))
+                        row.envNames.map((name) => {
+                          const color = getEnvColor(name);
+                          return (
+                            <span
+                              key={`${row.topic.id}-${name}`}
+                              className="text-[10px] px-1.5 py-0.5 rounded border font-mono"
+                              style={{
+                                color,
+                                borderColor: `color-mix(in srgb, ${color} 40%, transparent)`,
+                                backgroundColor: `color-mix(in srgb, ${color} 10%, transparent)`,
+                              }}
+                            >
+                              {name}
+                            </span>
+                          );
+                        })
                       ) : (
                         <span className="text-[10px] text-text-dim">--</span>
                       )}

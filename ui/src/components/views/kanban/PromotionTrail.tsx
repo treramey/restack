@@ -1,5 +1,5 @@
 import type { PromotionTrailProps } from "./types.js";
-import { getEnvColor } from "./utils.js";
+import { getEnvColor } from "../../../lib/badges.js";
 
 export function PromotionTrail({ allEnvs, topicEnvIds, highestEnvId }: PromotionTrailProps) {
   if (allEnvs.length <= 1) return null;

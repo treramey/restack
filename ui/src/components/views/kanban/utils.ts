@@ -62,12 +62,3 @@ export function unassignedTopics(
       (!assignedIds.has(t.id) || t.status === "graduated"),
   );
 }
-
-/** Map an environment name to its CSS color variable value. */
-export function getEnvColor(name: string): string {
-  const lower = name.toLowerCase();
-  if (lower.includes("dev")) return "var(--color-env-dev)";
-  if (lower.includes("stag")) return "var(--color-env-staging)";
-  if (lower.includes("prod")) return "var(--color-env-production)";
-  return "var(--color-accent)";
-}

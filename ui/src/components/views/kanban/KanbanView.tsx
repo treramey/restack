@@ -322,12 +322,41 @@ export function KanbanView() {
 
   // No repo selected state (kanban requires a specific repo)
   if (!selectedRepoId) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted font-mono text-sm p-8">
-        <p>Select a repository</p>
-        <p className="text-text-dim text-xs">
-          Use the dropdown above to choose a repo
-        </p>
+    const hasRepos = repos.length > 0;
+    return hasRepos ? (
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 sm:gap-8 p-4 sm:p-8 animate-fade-in">
+        {/* Ghost kanban preview — user is one click from seeing real lanes */}
+        <div className="flex gap-3 opacity-[0.07] pointer-events-none select-none animate-stagger-in" aria-hidden="true">
+          {["dev", "staging", "production"].map((env, i) => (
+            <div key={env} className={`w-36 sm:w-44 flex flex-col gap-2 ${i === 2 ? "hidden sm:flex" : ""}`}>
+              <div className="h-7 rounded border border-text-primary flex items-center px-2.5 text-[11px] font-mono uppercase tracking-wider text-text-primary">
+                {env}
+              </div>
+              {Array.from({ length: env === "dev" ? 3 : 2 }, (_, j) => (
+                <div key={j} className="h-14 rounded border border-dashed border-text-primary" />
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-col items-center gap-1.5 text-center font-mono">
+          <p className="text-text-muted text-sm uppercase tracking-wider">Select a repository</p>
+          <p className="text-text-muted text-xs">Use the dropdown above to choose a repo</p>
+        </div>
+      </div>
+    ) : (
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 sm:gap-8 p-4 sm:p-8 animate-fade-in">
+        {/* Folder icon — no repos tracked yet */}
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="text-text-muted" aria-hidden="true">
+          <path d="M8 14a2 2 0 012-2h7.172a2 2 0 011.414.586l2.828 2.828A2 2 0 0022.828 16H38a2 2 0 012 2v18a2 2 0 01-2 2H10a2 2 0 01-2-2V14z" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M17 26h14M17 31h9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+        </svg>
+        <div className="flex flex-col items-center gap-1.5 text-center font-mono">
+          <p className="text-text-muted text-sm uppercase tracking-wider">No repositories tracked</p>
+          <p className="text-text-muted text-xs">
+            Click <span className="text-accent">Sync</span> above or run{" "}
+            <code className="text-accent">restack sync</code> to get started
+          </p>
+        </div>
       </div>
     );
   }
@@ -335,13 +364,28 @@ export function KanbanView() {
   // Empty state - no environments for this repo
   if (environments.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-2 text-text-muted font-mono text-sm p-8">
-        <p>No environments configured</p>
-        <p className="text-text-dim text-xs">
-          Add a <code className="text-accent">.restack.yml</code> to your
-          repo or run{" "}
-          <code className="text-accent">restack integration add</code>
-        </p>
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 sm:gap-8 p-4 sm:p-8 animate-fade-in">
+        {/* Ghost kanban preview */}
+        <div className="flex gap-3 opacity-[0.07] pointer-events-none select-none animate-stagger-in" aria-hidden="true">
+          {["dev", "staging", "production"].map((env, i) => (
+            <div key={env} className={`w-36 sm:w-44 flex flex-col gap-2 ${i === 2 ? "hidden sm:flex" : ""}`}>
+              <div className="h-7 rounded border border-text-primary flex items-center px-2.5 text-[11px] font-mono uppercase tracking-wider text-text-primary">
+                {env}
+              </div>
+              {Array.from({ length: 2 }, (_, j) => (
+                <div key={j} className="h-14 rounded border border-dashed border-text-primary" />
+              ))}
+            </div>
+          ))}
+        </div>
+        {/* Message */}
+        <div className="flex flex-col items-center gap-1.5 text-center font-mono">
+          <p className="text-text-muted text-sm uppercase tracking-wider">No environments configured</p>
+          <p className="text-text-muted text-xs">
+            Define your promotion stages in <code className="text-accent">.restack.yml</code>
+            {" "}or run <code className="text-accent">restack integration add</code>
+          </p>
+        </div>
       </div>
     );
   }
