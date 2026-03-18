@@ -553,6 +553,11 @@ export interface UiServerConfig {
   contextRepo?: string;
 }
 
+/** Deferred auto-refresh: wait until the UI's WebSocket connects so initial
+ *  data queries aren't blocked behind the long-running refresh in the serial
+ *  serve pipeline. */
+let autoRefreshTriggered = false;
+
 export function createUiApp(staticRoot: string, contextRepo?: string) {
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
@@ -562,6 +567,12 @@ export function createUiApp(staticRoot: string, contextRepo?: string) {
     upgradeWebSocket(() => ({
       onOpen(_e, ws) {
         wsClients.add(ws as unknown as WsClient);
+        if (!autoRefreshTriggered) {
+          autoRefreshTriggered = true;
+          // Small delay lets the UI's initial API queries drain through the
+          // single-threaded serve process before we enqueue the slow refresh.
+          setTimeout(() => runBackgroundRefresh(), 500);
+        }
       },
       onClose(_e, ws) {
         wsClients.delete(ws as unknown as WsClient);
@@ -630,9 +641,9 @@ export async function startUiServer(config: UiServerConfig): Promise<void> {
         : "xdg-open";
       import("node:child_process").then(({ exec }) => exec(`${open} ${url}`));
 
-      // Auto-refresh in background: UI loads cached DB data immediately,
-      // then updates stream in via WebSocket when refresh completes.
-      runBackgroundRefresh();
+      // Auto-refresh is deferred until the first WebSocket connection (see createUiApp).
+      // This prevents the slow refresh from blocking initial data queries in the
+      // single-threaded serve pipeline.
     }
   );
 
