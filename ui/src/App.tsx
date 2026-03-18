@@ -64,7 +64,7 @@ export function App() {
         </ErrorBoundary>
       </main>
 
-      <Toaster position="bottom-right" theme="dark" />
+      <Toaster position="bottom-right" theme="dark" closeButton />
     </div>
   );
 }
